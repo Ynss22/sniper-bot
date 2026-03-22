@@ -162,7 +162,7 @@ class NewPoolDetector:
                 if not created:
                     continue
                 age_sec = (time.time() * 1000 - created) / 1000
-                if age_sec > CONFIG["max_token_age_sec"]:
+                if age_sec > 1800:
                     continue
                 addr = pair.get("baseToken", {}).get("address", "")
                 if addr in self.seen:
