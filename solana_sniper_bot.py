@@ -2,8 +2,9 @@
 ╔══════════════════════════════════════════════════════════════════╗
 ║           SOLANA SNIPER BOT — SIMULATION MODE                   ║
 ║           Stratégie : Achat < 30sec après lancement             ║
-║           Protection : Comportementale (pas par temps)          ║
-║           Règle : -10% immédiat OU 3 baisses consécutives       ║
+║           Break-Even + Protection 2sec + TP progressifs         ║
+║           TP0: +17%→20% | TP1: +50%→30% |                      ║
+║           TP2: +200%→20% | TP3: +900%→reste                    ║
 ╚══════════════════════════════════════════════════════════════════╝
 """
 
@@ -18,27 +19,22 @@ from colorama import Fore, Style, init
 init(autoreset=True)
 
 CONFIG = {
-    "initial_capital_sol":      50.0,
-    "sol_per_trade":             2.0,
-    "max_positions":             3,
-    "min_liquidity_usd":      3_000,
-    "max_liquidity_usd":    100_000,
-    "min_score":                 60,
-    "max_top_holder_pct":        20,
-    "stop_loss_pct":            -25,
-    "breakeven_trigger_x":      1.15,
-    "take_profit_0":             1.17,
-    "take_profit_1":             1.50,
-    "take_profit_2":             3.00,
-    "take_profit_3":            10.00,
-    "max_hold_minutes":          120,
-    "scan_interval_sec":           2,
-    "max_token_age_sec":          30,
-
-    # ── Nouvelle protection comportementale ──────────────────
-    "emergency_dump_pct":       -10,   # Vente immédiate si -10% instantané
-    "consecutive_drops":          3,   # Vente si 3 baisses consécutives
-    "min_drop_per_scan":       -0.02,  # Baisse minimum par scan (-2%)
+    "initial_capital_sol":    50.0,
+    "sol_per_trade":           2.0,
+    "max_positions":           3,
+    "min_liquidity_usd":    3_000,
+    "max_liquidity_usd":  100_000,
+    "min_score":               60,
+    "max_top_holder_pct":      20,
+    "stop_loss_pct":          -25,
+    "breakeven_trigger_x":    1.15,
+    "take_profit_0":           1.17,   # Vend 20% à +17%
+    "take_profit_1":           1.50,   # Vend 30% à +50%
+    "take_profit_2":           3.00,   # Vend 20% à +200%
+    "take_profit_3":          10.00,   # Vend le reste à +900%
+    "max_hold_minutes":        120,
+    "scan_interval_sec":         2,
+    "max_token_age_sec":        30,
 }
 
 logging.basicConfig(
@@ -75,23 +71,20 @@ class SniperWallet:
         self.sol_balance -= amount
         self.total_trades += 1
         self.positions[token["address"]] = {
-            "symbol":              token["symbol"],
-            "address":             token["address"],
-            "entry_price":         token["price_usd"],
-            "entry_time":          datetime.now(timezone.utc),
-            "sol_invested":        amount,
-            "remaining_pct":       100.0,
-            "tp0_hit":             False,
-            "tp1_hit":             False,
-            "tp2_hit":             False,
-            "tp3_hit":             False,
-            "current_x":           1.0,
-            "peak_x":              1.0,
-            "prev_x":              1.0,       # Prix scan précédent
-            "consecutive_drops":   0,         # Compteur baisses consécutives
-            "price_history":       [1.0],     # Historique des x
-            "is_rug":              token.get("will_rug", False),
-            "breakeven_active":    False,
+            "symbol":           token["symbol"],
+            "address":          token["address"],
+            "entry_price":      token["price_usd"],
+            "entry_time":       datetime.now(timezone.utc),
+            "sol_invested":     amount,
+            "remaining_pct":    100.0,
+            "tp0_hit":          False,
+            "tp1_hit":          False,
+            "tp2_hit":          False,
+            "tp3_hit":          False,
+            "current_x":        1.0,
+            "peak_x":           1.0,
+            "is_rug":           token.get("will_rug", False),
+            "breakeven_active": False,
         }
         return True
 
@@ -312,42 +305,6 @@ class PriceSimulator:
         return round(x, 4)
 
 
-def check_behavioral_protection(pos: dict, x: float) -> tuple:
-    """
-    Nouvelle protection comportementale — plus intelligente que la règle 2sec.
-
-    Règle 1 — Dump urgent : -10% instantané → vente immédiate
-    Règle 2 — Chute continue : 3 baisses consécutives de -2% chacune → vente
-    Règle 3 — Si le prix rebondit après une baisse → on garde
-
-    Retourne (doit_vendre: bool, raison: str)
-    """
-    prev_x = pos.get("prev_x", 1.0)
-
-    # ── Règle 1 : Dump urgent -10% ────────────────────────────
-    if x <= (1 + CONFIG["emergency_dump_pct"] / 100):
-        return True, f"🚨 Dump urgent {(x-1)*100:.1f}%"
-
-    # ── Règle 2 : Baisses consécutives ───────────────────────
-    drop_this_scan = (x - prev_x) / max(prev_x, 1e-10)
-
-    if drop_this_scan <= CONFIG["min_drop_per_scan"]:
-        pos["consecutive_drops"] += 1
-    else:
-        # Rebond détecté → reset du compteur
-        if pos["consecutive_drops"] > 0:
-            print(f"  {Fore.GREEN}  🔄 Rebond détecté — {pos['symbol']} | "
-                  f"Compteur baisses remis à 0{Style.RESET_ALL}")
-        pos["consecutive_drops"] = 0
-
-    if pos["consecutive_drops"] >= CONFIG["consecutive_drops"]:
-        return True, f"📉 {pos['consecutive_drops']} baisses consécutives"
-
-    # ── Pas de vente ──────────────────────────────────────────
-    pos["prev_x"] = x
-    return False, ""
-
-
 def print_dashboard(wallet: SniperWallet, sol_price: float):
     total_sol = wallet.sol_balance + sum(
         p["sol_invested"] * p.get("current_x", 1) * (p["remaining_pct"] / 100)
@@ -375,11 +332,15 @@ def print_dashboard(wallet: SniperWallet, sol_price: float):
             xcolor = Fore.GREEN if x >= 1 else Fore.RED
             age_s  = (datetime.now(timezone.utc) - pos["entry_time"]).seconds
             be     = f"{Fore.CYAN}🔒 BE{Style.RESET_ALL}" if pos.get("breakeven_active") else ""
-            drops  = pos.get("consecutive_drops", 0)
-            drop_warn = f"{Fore.RED}⚠️ {drops} baisses{Style.RESET_ALL}" if drops > 0 else ""
+            tps    = []
+            if pos["tp0_hit"]: tps.append("TP0")
+            if pos["tp1_hit"]: tps.append("TP1")
+            if pos["tp2_hit"]: tps.append("TP2")
+            tp_str = " ".join(tps)
             print(f"  {xcolor}  {pos['symbol']:<14} {x:.2f}x | "
+                  f"{pos['sol_invested']:.1f} SOL | "
                   f"Restant: {pos['remaining_pct']:.0f}% | "
-                  f"Age: {age_s}s {be} {drop_warn}")
+                  f"Age: {age_s}s {be} {tp_str}")
 
     if wallet.closed_trades:
         print(f"\n  📜 DERNIERS TRADES :")
@@ -389,14 +350,10 @@ def print_dashboard(wallet: SniperWallet, sol_price: float):
                   f"P&L: {t['pnl_sol']:+.4f} SOL | {t['reason']}{Style.RESET_ALL}")
 
     print(f"\n  📊 GRILLE DES TPs :")
-    print(f"     TP0 : +17%  → vend 20%")
-    print(f"     TP1 : +50%  → vend 30%")
-    print(f"     TP2 : +200% → vend 20%")
+    print(f"     TP0 : +17%  → vend 20% de la position")
+    print(f"     TP1 : +50%  → vend 30% de la position")
+    print(f"     TP2 : +200% → vend 20% de la position")
     print(f"     TP3 : +900% → vend le reste")
-    print(f"\n  🛡️  PROTECTION COMPORTEMENTALE :")
-    print(f"     Dump urgent  : -10% instantané → vente immédiate")
-    print(f"     Chute continue: 3 baisses de -2% consécutives → vente")
-    print(f"     Rebond détecté: compteur remis à 0 → on garde")
     print(f"{Fore.CYAN}{'═'*62}{Style.RESET_ALL}\n")
 
 
@@ -423,30 +380,28 @@ def run_sniper(wallet: SniperWallet, detector: NewPoolDetector,
         x = simulator.get_current_x(pos)
         pos["current_x"] = x
         pos["peak_x"]    = max(pos.get("peak_x", 1.0), x)
-        pos["price_history"].append(x)
         age_sec = (datetime.now(timezone.utc) - pos["entry_time"]).seconds
         age_min = age_sec / 60
 
-        # ── Protection comportementale ────────────────────────
-        should_sell, reason = check_behavioral_protection(pos, x)
-        if should_sell:
-            to_close.append((address, x, reason, None))
+        # ── Protection 2 secondes : -3% → vente immédiate ────
+        if age_sec <= 2 and x <= 0.97:
+            to_close.append((address, x, "⚡ Protection 2sec -3%", None))
             continue
 
         # ── Break-Even : activation dès +15% ─────────────────
         if x >= CONFIG["breakeven_trigger_x"] and not pos["breakeven_active"]:
             pos["breakeven_active"] = True
             log.info(f"  🔒 BREAK-EVEN activé — {pos['symbol']} | "
-                     f"+{(x-1)*100:.0f}% atteint")
+                     f"+{(x-1)*100:.0f}% atteint → SL = prix d'entrée")
             print(f"  {Fore.CYAN}🔒 BREAK-EVEN activé — {pos['symbol']} | "
-                  f"SL = prix d'entrée{Style.RESET_ALL}")
+                  f"Stop Loss déplacé au prix d'entrée{Style.RESET_ALL}")
 
-        # ── Break-Even déclenché ──────────────────────────────
+        # ── Break-Even déclenché : sortie FORCÉE à 1.0x ──────
         if pos["breakeven_active"] and x < 1.0:
             to_close.append((address, x, "🔒 Break-Even — sortie sans perte", 1.0))
             continue
 
-        # ── Stop Loss normal -25% ─────────────────────────────
+        # ── Stop Loss normal ──────────────────────────────────
         if x <= (1 + CONFIG["stop_loss_pct"] / 100):
             reason = "Rug Pull 💀" if pos.get("is_rug") else "Stop Loss -25%"
             to_close.append((address, x, reason, None))
@@ -457,22 +412,22 @@ def run_sniper(wallet: SniperWallet, detector: NewPoolDetector,
             to_close.append((address, x, "⏰ Temps max dépassé", None))
             continue
 
-        # ── TP0 — vend 20% à +17% ────────────────────────────
+        # ── TP0 — vend 20% à +17% ─────────────────────────────
         if x >= CONFIG["take_profit_0"] and not pos["tp0_hit"]:
             pos["tp0_hit"] = True
             wallet.partial_sell(address, 20, x, f"TP0 +{(x-1)*100:.0f}%")
 
-        # ── TP1 — vend 30% à +50% ────────────────────────────
+        # ── TP1 — vend 30% à +50% ─────────────────────────────
         if x >= CONFIG["take_profit_1"] and not pos["tp1_hit"]:
             pos["tp1_hit"] = True
             wallet.partial_sell(address, 30, x, f"TP1 +{(x-1)*100:.0f}%")
 
-        # ── TP2 — vend 20% à +200% ───────────────────────────
+        # ── TP2 — vend 20% à +200% ────────────────────────────
         if x >= CONFIG["take_profit_2"] and not pos["tp2_hit"]:
             pos["tp2_hit"] = True
             wallet.partial_sell(address, 20, x, f"TP2 +{(x-1)*100:.0f}%")
 
-        # ── TP3 — vend le reste à +900% ──────────────────────
+        # ── TP3 — vend le reste à +900% ───────────────────────
         if x >= CONFIG["take_profit_3"] and not pos["tp3_hit"]:
             pos["tp3_hit"] = True
             to_close.append((address, x, f"🚀 MOONSHOT {x:.1f}x", None))
@@ -497,6 +452,7 @@ def run_sniper(wallet: SniperWallet, detector: NewPoolDetector,
         else:
             print(f"  {Fore.RED}❌ REFUSÉ — Score {analysis['score']}/100{Style.RESET_ALL}")
 
+    # Dashboard toutes les 30 secondes
     if int(time.time()) % 30 < 2:
         print_dashboard(wallet, detector.sol_usd)
 
@@ -507,10 +463,7 @@ def main():
 ║         SOLANA SNIPER BOT — SIMULATION MODE                  ║
 ║         Capital   : 50.0 SOL fictifs                        ║
 ║         Mise/trade: 2.0 SOL | Scan : 2sec                   ║
-║         🛡️  Protection comportementale :                     ║
-║             Dump urgent  : -10% → vente immédiate           ║
-║             Chute continue: 3x -2% consécutifs → vente      ║
-║             Rebond détecté: on garde                        ║
+║         Protection: -3% dans les 2 premières secondes       ║
 ║         Break-Even: activé dès +15%                         ║
 ║         TP0: +17%→20% | TP1: +50%→30%                      ║
 ║         TP2: +200%→20% | TP3: +900%→reste                  ║
