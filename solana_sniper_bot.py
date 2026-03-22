@@ -2,7 +2,7 @@
 ╔══════════════════════════════════════════════════════════════════╗
 ║           SOLANA SNIPER BOT — SIMULATION MODE                   ║
 ║           Stratégie : Achat < 30sec après lancement             ║
-║           Break-Even + Protection 2sec + TP progressifs         ║
+║           Protection comportementale v3         ║
 ║           TP0: +17%→20% | TP1: +50%→30% |                      ║
 ║           TP2: +200%→20% | TP3: +900%→reste                    ║
 ╚══════════════════════════════════════════════════════════════════╝
@@ -294,7 +294,7 @@ class PriceSimulator:
             else:
                 x = max(0.05, peak * np.exp(-age_s / 120 * random.uniform(1, 3)))
         else:
-            sigma = 0.08
+            sigma = 0.04
             drift = 0.003
             steps = max(1, age_s // 5)
             x     = 1.0
