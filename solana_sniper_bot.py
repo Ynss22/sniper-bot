@@ -383,10 +383,7 @@ def run_sniper(wallet: SniperWallet, detector: NewPoolDetector,
         age_sec = (datetime.now(timezone.utc) - pos["entry_time"]).seconds
         age_min = age_sec / 60
 
-        # ── Protection 2 secondes : -3% → vente immédiate ────
-        if age_sec <= 2 and x <= 0.97:
-            to_close.append((address, x, "⚡ Protection 2sec -3%", None))
-            continue
+
 
         # ── Break-Even : activation dès +15% ─────────────────
         if x >= CONFIG["breakeven_trigger_x"] and not pos["breakeven_active"]:
@@ -463,7 +460,7 @@ def main():
 ║         SOLANA SNIPER BOT — SIMULATION MODE                  ║
 ║         Capital   : 50.0 SOL fictifs                        ║
 ║         Mise/trade: 2.0 SOL | Scan : 2sec                   ║
-║         Protection: -3% dans les 2 premières secondes       ║
+║         Protection comportementale v3       ║
 ║         Break-Even: activé dès +15%                         ║
 ║         TP0: +17%→20% | TP1: +50%→30%                      ║
 ║         TP2: +200%→20% | TP3: +900%→reste                  ║
