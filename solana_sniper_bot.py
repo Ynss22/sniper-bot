@@ -148,31 +148,78 @@ class NewPoolDetector:
             pass
 
     def scan_new_pools(self) -> list:
+        tokens = []
         try:
-            url = "https://api.dexscreener.com/token-profiles/latest/v1"
-            r   = requests.get(url, timeout=8)
+            import time as t
+            # Récupère les derniers profils de tokens Solana
+            r = requests.get(
+                "https://api.dexscreener.com/token-profiles/latest/v1",
+                timeout=10,
+                headers={"User-Agent": "Mozilla/5.0"}
+            )
             if r.status_code != 200:
                 return []
-            pairs     = r.json().get("pairs", [])
-            new_pools = []
-            for pair in pairs:
-                if pair.get("chainId") != "solana":
+
+            profiles = r.json() if isinstance(r.json(), list) else []
+
+            for profile in profiles[:10]:
+                if profile.get("chainId") != "solana":
                     continue
+                addr = profile.get("tokenAddress", "")
+                if not addr or addr in self.seen:
+                    continue
+
+                # Récupère les données de trading
+                r2 = requests.get(
+                    f"https://api.dexscreener.com/latest/dex/tokens/{addr}",
+                    timeout=8,
+                    headers={"User-Agent": "Mozilla/5.0"}
+                )
+                if r2.status_code != 200:
+                    continue
+
+                pairs = r2.json().get("pairs", None) or []
+                sol_pairs = [p for p in pairs if p.get("chainId") == "solana"]
+                if not sol_pairs:
+                    continue
+
+                pair = sol_pairs[0]
+                liq  = float(pair.get("liquidity", {}).get("usd", 0) or 0)
+                vol  = pair.get("volume", {})
+                txns = pair.get("txns", {})
+                m5   = txns.get("m5", {})
                 created = pair.get("pairCreatedAt", 0)
-                if not created:
-                    continue
-                age_sec = (time.time() * 1000 - created) / 1000
-                if age_sec > 1800:
-                    continue
-                addr = pair.get("baseToken", {}).get("address", "")
-                if addr in self.seen:
-                    continue
-                token = self._parse(pair, age_sec)
-                if token:
-                    new_pools.append(token)
-            return new_pools if new_pools else self._simulate_new_launches()
-        except Exception:
-            return []
+                now_ms  = t.time() * 1000
+                age_min = (now_ms - created) / 60000 if created else 0
+
+                token = {
+                    "address":       addr,
+                    "symbol":        pair.get("baseToken", {}).get("symbol", "???"),
+                    "name":          pair.get("baseToken", {}).get("name", "Unknown"),
+                    "price_usd":     float(pair.get("priceUsd", 0) or 0),
+                    "liquidity_usd": liq,
+                    "volume_1h":     float(vol.get("h1", 0) or 0),
+                    "volume_5m":     float(vol.get("m5", 0) or 0),
+                    "buys":          int(m5.get("buys", 0) or 0),
+                    "sells":         int(m5.get("sells", 0) or 0),
+                    "age_min":       round(age_min, 1),
+                    "age_sec":       age_min * 60,
+                    "is_real":       True,
+                    "will_rug":      False,
+                    "dex_url":       pair.get("url", ""),
+                }
+
+                if token["price_usd"] > 0 and token["liquidity_usd"] > 0:
+                    tokens.append(token)
+                    print(f"  🌐 VRAI TOKEN : {token['symbol']} | ${liq:,.0f} liq | {age_min:.1f}min")
+
+                t.sleep(0.5)
+
+        except Exception as e:
+            import logging
+            logging.getLogger("SNIPER").error(f"API erreur: {e}")
+
+        return tokens
 
     def _parse(self, pair: dict, age_sec: float) -> dict:
         try:
