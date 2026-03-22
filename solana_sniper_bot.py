@@ -582,7 +582,7 @@ def run_sniper(wallet: SniperWallet, detector: NewPoolDetector,
         wallet.close_position(address, x, reason, force_x=force_x)
 
     analyzer   = AntiRugAnalyzer()
-    new_tokens = detector.scan_new_pools()
+    new_tokens = detector.scan_new_pools() or []
     for token in new_tokens:
         if token["address"] in detector.seen:
             continue
