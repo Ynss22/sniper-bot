@@ -1,6 +1,6 @@
 """
 ╔══════════════════════════════════════════════════════════════════╗
-║           SOLANA SNIPER BOT — SIMULATION MODE                   ║
+║           SOLANA SNIPER BOT v4 — VRAIS TOKENS RAYDIUM                   ║
 ║           Stratégie : Achat < 30sec après lancement             ║
 ║           Protection comportementale v4 — vrais tokens         ║
 ║           TP0: +17%→20% | TP1: +50%→30% |                      ║
@@ -457,7 +457,7 @@ def run_sniper(wallet: SniperWallet, detector: NewPoolDetector,
 def main():
     print(f"""{Fore.YELLOW}
 ╔══════════════════════════════════════════════════════════════╗
-║         SOLANA SNIPER BOT — SIMULATION MODE                  ║
+║         SOLANA SNIPER BOT v4 — VRAIS TOKENS RAYDIUM                  ║
 ║         Capital   : 50.0 SOL fictifs                        ║
 ║         Mise/trade: 2.0 SOL | Scan : 2sec                   ║
 ║         Protection comportementale v4                        ║
