@@ -149,7 +149,7 @@ class NewPoolDetector:
 
     def scan_new_pools(self) -> list:
         try:
-            url = "https://api.dexscreener.com/latest/dex/search?q=raydium+solana"
+            url = "https://api.dexscreener.com/token-profiles/latest/v1"
             r   = requests.get(url, timeout=8)
             if r.status_code != 200:
                 return self._simulate_new_launches()
