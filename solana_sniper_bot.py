@@ -152,7 +152,7 @@ class NewPoolDetector:
             url = "https://api.dexscreener.com/token-profiles/latest/v1"
             r   = requests.get(url, timeout=8)
             if r.status_code != 200:
-                return self._simulate_new_launches()
+                return []
             pairs     = r.json().get("pairs", [])
             new_pools = []
             for pair in pairs:
@@ -172,7 +172,7 @@ class NewPoolDetector:
                     new_pools.append(token)
             return new_pools if new_pools else self._simulate_new_launches()
         except Exception:
-            return self._simulate_new_launches()
+            return []
 
     def _parse(self, pair: dict, age_sec: float) -> dict:
         try:
