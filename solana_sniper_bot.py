@@ -447,7 +447,7 @@ def run_sniper(wallet: SniperWallet, detector: NewPoolDetector,
 
         # ── Stop Loss normal ──────────────────────────────────
         if x <= (1 + CONFIG["stop_loss_pct"] / 100):
-            reason = "Rug Pull 💀" if pos.get("is_rug") else "Stop Loss -25%"
+            reason = "Rug Pull 💀" if pos.get("is_rug") else "Stop Loss -20%"
             to_close.append((address, x, reason, None))
             continue
 
@@ -459,7 +459,7 @@ def run_sniper(wallet: SniperWallet, detector: NewPoolDetector,
         # ── TP0 — vend 20% à +17% ─────────────────────────────
         if x >= CONFIG["take_profit_0"] and not pos["tp0_hit"]:
             pos["tp0_hit"] = True
-            wallet.partial_sell(address, 20, x, f"TP0 +{(x-1)*100:.0f}%")
+            wallet.partial_sell(address, 100, x, f"TP0 +{(x-1)*100:.0f}%")
 
         # ── TP1 — vend 30% à +50% ─────────────────────────────
         if x >= CONFIG["take_profit_1"] and not pos["tp1_hit"]:
