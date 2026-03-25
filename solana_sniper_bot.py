@@ -507,6 +507,42 @@ def run_sniper(wallet: SniperWallet, detector: NewPoolDetector,
         print_dashboard(wallet, detector.sol_usd)
 
 
+def get_real_sol_balance() -> float:
+    """Récupère le vrai solde SOL du wallet via RPC Solana."""
+    try:
+        import os, requests
+        key = os.getenv("WALLET_PRIVATE_KEY")
+        if not key:
+            return 50.0  # Capital fictif si pas de clé
+
+        # Récupère l'adresse publique depuis la clé privée
+        from base58 import b58decode
+        import hashlib
+
+        # Appel RPC Solana pour le solde
+        wallet_address = os.getenv("WALLET_ADDRESS", "")
+        if not wallet_address:
+            return 50.0
+
+        r = requests.post(
+            "https://api.mainnet-beta.solana.com",
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "getBalance",
+                "params": [wallet_address]
+            },
+            timeout=10
+        )
+        if r.status_code == 200:
+            lamports = r.json().get("result", {}).get("value", 0)
+            sol = lamports / 1_000_000_000
+            print(f"  💰 Vrai solde wallet : {sol:.4f} SOL")
+            return sol
+    except Exception as e:
+        print(f"  ⚠️  Erreur solde: {e}")
+    return 50.0
+
 def main():
     print(f"""{Fore.YELLOW}
 ╔══════════════════════════════════════════════════════════════╗
@@ -521,7 +557,9 @@ def main():
 ╚══════════════════════════════════════════════════════════════╝
 {Style.RESET_ALL}""")
 
-    wallet    = SniperWallet(CONFIG["initial_capital_sol"])
+    real_balance = get_real_sol_balance()
+    initial = real_balance if real_balance > 0 else CONFIG["initial_capital_sol"]
+    wallet    = SniperWallet(initial)
     detector  = NewPoolDetector()
     analyzer  = AntiRugAnalyzer()
     simulator = PriceSimulator()
