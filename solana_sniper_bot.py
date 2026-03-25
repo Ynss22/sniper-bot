@@ -542,18 +542,18 @@ def main():
     print(f"""{Fore.YELLOW}
 ╔══════════════════════════════════════════════════════════════╗
 ║         SOLANA SNIPER BOT v4 — VRAIS TOKENS RAYDIUM                  ║
-║         Capital   : 50.0 SOL fictifs                        ║
+║         Capital   : Wallet réel Solana                      ║
 ║         Mise/trade: 2.0 SOL | Scan : 2sec                   ║
 ║         Protection comportementale v4                        ║
 ║         Break-Even: activé dès +15%                         ║
 ║         TP0: +17%→20% | TP1: +50%→30%                      ║
 ║         TP2: +200%→20% | TP3: +900%→reste                  ║
-║         Stop Loss : -25%                                     ║
+║         Stop Loss : -20%                                     ║
 ╚══════════════════════════════════════════════════════════════╝
 {Style.RESET_ALL}""")
 
     real_balance = get_real_sol_balance()
-    initial = real_balance if real_balance > 0.01 else CONFIG["initial_capital_sol"]
+    initial = real_balance if real_balance > 0 else 0.1
     print(f"  💰 Capital de trading : {initial:.4f} SOL")
     wallet = SniperWallet(initial)
     detector  = NewPoolDetector()
