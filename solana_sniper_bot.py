@@ -33,7 +33,7 @@ CONFIG = {
     "min_score":               80,
     "max_top_holder_pct":      20,
     "stop_loss_pct":          -25,
-    "breakeven_trigger_x":    1.15,
+    "breakeven_trigger_x":    1.17,
     "take_profit_0":           1.17,   # Vend 20% à +17%
     "take_profit_1":           1.50,   # Vend 30% à +50%
     "take_profit_2":           3.00,   # Vend 20% à +200%
