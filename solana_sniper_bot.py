@@ -30,7 +30,7 @@ CONFIG = {
     "max_positions":           3,
     "min_liquidity_usd":    3_000,
     "max_liquidity_usd":  100_000,
-    "min_score":               60,
+    "min_score":               80,
     "max_top_holder_pct":      20,
     "stop_loss_pct":          -25,
     "breakeven_trigger_x":    1.15,
