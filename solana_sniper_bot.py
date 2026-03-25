@@ -553,8 +553,9 @@ def main():
 {Style.RESET_ALL}""")
 
     real_balance = get_real_sol_balance()
-    initial = real_balance if real_balance > 0 else CONFIG["initial_capital_sol"]
-    wallet    = SniperWallet(initial)
+    initial = real_balance if real_balance > 0.01 else CONFIG["initial_capital_sol"]
+    print(f"  💰 Capital de trading : {initial:.4f} SOL")
+    wallet = SniperWallet(initial)
     detector  = NewPoolDetector()
     analyzer  = AntiRugAnalyzer()
     simulator = PriceSimulator()
