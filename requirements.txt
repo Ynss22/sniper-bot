@@ -2,3 +2,4 @@ requests
 numpy
 schedule
 colorama
+base58

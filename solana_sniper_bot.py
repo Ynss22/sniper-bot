@@ -515,11 +515,6 @@ def get_real_sol_balance() -> float:
         if not key:
             return 50.0  # Capital fictif si pas de clé
 
-        # Récupère l'adresse publique depuis la clé privée
-        from base58 import b58decode
-        import hashlib
-
-        # Appel RPC Solana pour le solde
         wallet_address = os.getenv("WALLET_ADDRESS", "")
         if not wallet_address:
             return 50.0
