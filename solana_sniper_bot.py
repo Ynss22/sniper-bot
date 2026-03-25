@@ -455,11 +455,11 @@ class NewPoolDetector:
     def _update_sol_price(self):
         try:
             r = requests.get(
-                "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd",
+                "https://api.binance.com/api/v3/ticker/price?symbol=SOLUSDT",
                 timeout=5
             )
             if r.status_code == 200:
-                self.sol_usd = r.json()["solana"]["usd"]
+                self.sol_usd = float(r.json()["price"])
         except Exception:
             pass
 
