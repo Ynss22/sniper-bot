@@ -1,14 +1,13 @@
 """
 ╔══════════════════════════════════════════════════════════════════╗
-║           SOLANA SNIPER BOT v4 — VRAIS TOKENS RAYDIUM                   ║
+║           SOLANA SNIPER BOT — SIMULATION MODE                   ║
 ║           Stratégie : Achat < 30sec après lancement             ║
-║           Protection comportementale v4 — vrais tokens         ║
+║           Break-Even + Protection 2sec + TP progressifs         ║
 ║           TP0: +17%→20% | TP1: +50%→30% |                      ║
 ║           TP2: +200%→20% | TP3: +900%→reste                    ║
 ╚══════════════════════════════════════════════════════════════════╝
 """
 
-import os
 import time
 import random
 import logging
@@ -19,21 +18,16 @@ from colorama import Fore, Style, init
 
 init(autoreset=True)
 
-# Mode réel si clé privée présente
-WALLET_KEY = os.getenv("WALLET_PRIVATE_KEY")
-REAL_MODE   = WALLET_KEY is not None
-print(f"Mode : {'🔴 TRADING RÉEL' if REAL_MODE else '🎮 SIMULATION'}")
-
 CONFIG = {
     "initial_capital_sol":    50.0,
     "sol_per_trade":           2.0,
     "max_positions":           3,
     "min_liquidity_usd":    3_000,
     "max_liquidity_usd":  100_000,
-    "min_score":               80,
+    "min_score":               60,
     "max_top_holder_pct":      20,
     "stop_loss_pct":          -25,
-    "breakeven_trigger_x":    1.17,
+    "breakeven_trigger_x":    1.15,
     "take_profit_0":           1.17,   # Vend 20% à +17%
     "take_profit_1":           1.50,   # Vend 30% à +50%
     "take_profit_2":           3.00,   # Vend 20% à +200%
@@ -154,78 +148,31 @@ class NewPoolDetector:
             pass
 
     def scan_new_pools(self) -> list:
-        tokens = []
         try:
-            import time as t
-            # Récupère les derniers profils de tokens Solana
-            r = requests.get(
-                "https://api.dexscreener.com/token-profiles/latest/v1",
-                timeout=10,
-                headers={"User-Agent": "Mozilla/5.0"}
-            )
+            url = "https://api.dexscreener.com/latest/dex/search?q=raydium+solana"
+            r   = requests.get(url, timeout=8)
             if r.status_code != 200:
-                return []
-
-            profiles = r.json() if isinstance(r.json(), list) else []
-
-            for profile in profiles[:10]:
-                if profile.get("chainId") != "solana":
+                return self._simulate_new_launches()
+            pairs     = r.json().get("pairs", [])
+            new_pools = []
+            for pair in pairs:
+                if pair.get("chainId") != "solana":
                     continue
-                addr = profile.get("tokenAddress", "")
-                if not addr or addr in self.seen:
-                    continue
-
-                # Récupère les données de trading
-                r2 = requests.get(
-                    f"https://api.dexscreener.com/latest/dex/tokens/{addr}",
-                    timeout=8,
-                    headers={"User-Agent": "Mozilla/5.0"}
-                )
-                if r2.status_code != 200:
-                    continue
-
-                pairs = r2.json().get("pairs", None) or []
-                sol_pairs = [p for p in pairs if p.get("chainId") == "solana"]
-                if not sol_pairs:
-                    continue
-
-                pair = sol_pairs[0]
-                liq  = float(pair.get("liquidity", {}).get("usd", 0) or 0)
-                vol  = pair.get("volume", {})
-                txns = pair.get("txns", {})
-                m5   = txns.get("m5", {})
                 created = pair.get("pairCreatedAt", 0)
-                now_ms  = t.time() * 1000
-                age_min = (now_ms - created) / 60000 if created else 0
-
-                token = {
-                    "address":       addr,
-                    "symbol":        pair.get("baseToken", {}).get("symbol", "???"),
-                    "name":          pair.get("baseToken", {}).get("name", "Unknown"),
-                    "price_usd":     float(pair.get("priceUsd", 0) or 0),
-                    "liquidity_usd": liq,
-                    "volume_1h":     float(vol.get("h1", 0) or 0),
-                    "volume_5m":     float(vol.get("m5", 0) or 0),
-                    "buys":          int(m5.get("buys", 0) or 0),
-                    "sells":         int(m5.get("sells", 0) or 0),
-                    "age_min":       round(age_min, 1),
-                    "age_sec":       age_min * 60,
-                    "is_real":       True,
-                    "will_rug":      False,
-                    "dex_url":       pair.get("url", ""),
-                }
-
-                if token["price_usd"] > 0 and token["liquidity_usd"] > 0:
-                    tokens.append(token)
-                    print(f"  🌐 VRAI TOKEN : {token['symbol']} | ${liq:,.0f} liq | {age_min:.1f}min")
-
-                t.sleep(0.5)
-
-        except Exception as e:
-            import logging
-            logging.getLogger("SNIPER").error(f"API erreur: {e}")
-
-        return tokens
+                if not created:
+                    continue
+                age_sec = (time.time() * 1000 - created) / 1000
+                if age_sec > CONFIG["max_token_age_sec"]:
+                    continue
+                addr = pair.get("baseToken", {}).get("address", "")
+                if addr in self.seen:
+                    continue
+                token = self._parse(pair, age_sec)
+                if token:
+                    new_pools.append(token)
+            return new_pools if new_pools else self._simulate_new_launches()
+        except Exception:
+            return self._simulate_new_launches()
 
     def _parse(self, pair: dict, age_sec: float) -> dict:
         try:
@@ -327,6 +274,7 @@ class AntiRugAnalyzer:
             details["Buy Pressure"] = f"❌ {ratio*100:.0f}%"
 
         buyable = (score >= CONFIG["min_score"] and
+                   "MINT_ACTIVE" not in flags and
                    "WHALE_CONCENTRATION" not in flags)
 
         return {"score": score, "details": details,
@@ -435,7 +383,10 @@ def run_sniper(wallet: SniperWallet, detector: NewPoolDetector,
         age_sec = (datetime.now(timezone.utc) - pos["entry_time"]).seconds
         age_min = age_sec / 60
 
-        # Protection 2sec supprimée en v4
+        # ── Protection 2 secondes : -3% → vente immédiate ────
+        if age_sec <= 2 and x <= 0.97:
+            to_close.append((address, x, "⚡ Protection 2sec -3%", None))
+            continue
 
         # ── Break-Even : activation dès +15% ─────────────────
         if x >= CONFIG["breakeven_trigger_x"] and not pos["breakeven_active"]:
@@ -452,7 +403,7 @@ def run_sniper(wallet: SniperWallet, detector: NewPoolDetector,
 
         # ── Stop Loss normal ──────────────────────────────────
         if x <= (1 + CONFIG["stop_loss_pct"] / 100):
-            reason = "Rug Pull 💀" if pos.get("is_rug") else "Stop Loss -20%"
+            reason = "Rug Pull 💀" if pos.get("is_rug") else "Stop Loss -25%"
             to_close.append((address, x, reason, None))
             continue
 
@@ -464,7 +415,7 @@ def run_sniper(wallet: SniperWallet, detector: NewPoolDetector,
         # ── TP0 — vend 20% à +17% ─────────────────────────────
         if x >= CONFIG["take_profit_0"] and not pos["tp0_hit"]:
             pos["tp0_hit"] = True
-            wallet.partial_sell(address, 100, x, f"TP0 +{(x-1)*100:.0f}%")
+            wallet.partial_sell(address, 20, x, f"TP0 +{(x-1)*100:.0f}%")
 
         # ── TP1 — vend 30% à +50% ─────────────────────────────
         if x >= CONFIG["take_profit_1"] and not pos["tp1_hit"]:
@@ -506,55 +457,21 @@ def run_sniper(wallet: SniperWallet, detector: NewPoolDetector,
         print_dashboard(wallet, detector.sol_usd)
 
 
-def get_real_sol_balance() -> float:
-    """Récupère le vrai solde SOL du wallet via RPC Solana."""
-    try:
-        import os, requests
-        key = os.getenv("WALLET_PRIVATE_KEY")
-        if not key:
-            return 50.0  # Capital fictif si pas de clé
-
-        wallet_address = os.getenv("WALLET_ADDRESS", "")
-        if not wallet_address:
-            return 50.0
-
-        r = requests.post(
-            "https://api.mainnet-beta.solana.com",
-            json={
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "getBalance",
-                "params": [wallet_address]
-            },
-            timeout=10
-        )
-        if r.status_code == 200:
-            lamports = r.json().get("result", {}).get("value", 0)
-            sol = lamports / 1_000_000_000
-            print(f"  💰 Vrai solde wallet : {sol:.4f} SOL")
-            return sol
-    except Exception as e:
-        print(f"  ⚠️  Erreur solde: {e}")
-    return 50.0
-
 def main():
     print(f"""{Fore.YELLOW}
 ╔══════════════════════════════════════════════════════════════╗
-║         SOLANA SNIPER BOT v4 — VRAIS TOKENS RAYDIUM                  ║
-║         Capital   : Wallet réel Solana                      ║
+║         SOLANA SNIPER BOT — SIMULATION MODE                  ║
+║         Capital   : 50.0 SOL fictifs                        ║
 ║         Mise/trade: 2.0 SOL | Scan : 2sec                   ║
-║         Protection comportementale v4                        ║
+║         Protection: -3% dans les 2 premières secondes       ║
 ║         Break-Even: activé dès +15%                         ║
 ║         TP0: +17%→20% | TP1: +50%→30%                      ║
 ║         TP2: +200%→20% | TP3: +900%→reste                  ║
-║         Stop Loss : -20%                                     ║
+║         Stop Loss : -25%                                     ║
 ╚══════════════════════════════════════════════════════════════╝
 {Style.RESET_ALL}""")
 
-    real_balance = get_real_sol_balance()
-    initial = real_balance if real_balance > 0 else 0.1
-    print(f"  💰 Capital de trading : {initial:.4f} SOL")
-    wallet = SniperWallet(initial)
+    wallet    = SniperWallet(CONFIG["initial_capital_sol"])
     detector  = NewPoolDetector()
     analyzer  = AntiRugAnalyzer()
     simulator = PriceSimulator()
