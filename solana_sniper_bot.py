@@ -8,6 +8,7 @@
 ╚══════════════════════════════════════════════════════════════════╝
 """
 
+import os
 import time
 import random
 import logging
@@ -17,6 +18,11 @@ from datetime import datetime, timezone
 from colorama import Fore, Style, init
 
 init(autoreset=True)
+
+# Mode réel si clé privée présente
+WALLET_KEY = os.getenv("WALLET_PRIVATE_KEY")
+REAL_MODE   = WALLET_KEY is not None
+print(f"Mode : {'🔴 TRADING RÉEL' if REAL_MODE else '🎮 SIMULATION'}")
 
 CONFIG = {
     "initial_capital_sol":    50.0,
