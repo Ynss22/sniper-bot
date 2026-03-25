@@ -326,11 +326,6 @@ class AntiRugAnalyzer:
             flags.append("SELL_PRESSURE")
             details["Buy Pressure"] = f"❌ {ratio*100:.0f}%"
 
-        # Seul le Top Holder bloque — les autres sont des malus
-        if "MINT_ACTIVE" in flags:
-            score -= 10  # Malus mais pas bloquant
-        if "LP_NOT_BURNED" in flags:
-            score -= 5   # Malus léger
         buyable = (score >= CONFIG["min_score"] and
                    "WHALE_CONCENTRATION" not in flags)
 
