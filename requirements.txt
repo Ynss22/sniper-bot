@@ -2,4 +2,6 @@ requests
 numpy
 schedule
 colorama
+solana
+solders
 base58
