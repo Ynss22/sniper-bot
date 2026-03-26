@@ -1,0 +1,24 @@
+2026-03-26 16:15:02,445 | ⚡ SNIPE — LUMI | AntiRug: 100 | RugCheck: 501
+2026-03-26 16:15:02,658 | ⚡ SNIPE — Gibbs | AntiRug: 93 | RugCheck: 501
+2026-03-26 16:17:12,446 |   🟢 FERMÉ 🌐 — Gibbs | 1.02x | P&L: +0.1158 SOL | 📉 3 baisses consécutives
+2026-03-26 16:20:16,408 | ✅ Wallet initialisé : 9quCe4Tm972rPcGckwY9...
+2026-03-26 17:30:18,589 | API erreur: ('Connection aborted.', ConnectionResetError(54, 'Connection reset by peer'))
+2026-03-26 17:48:21,286 | API erreur: ('Connection aborted.', ConnectionResetError(54, 'Connection reset by peer'))
+2026-03-26 18:19:00,941 | 🛒 ACHAT RÉEL — NEFE
+2026-03-26 18:19:00,941 |    Montant : 0.0371 SOL
+2026-03-26 18:19:00,941 |    Token   : 72ZvWeeeeG39N4SceLUp...
+2026-03-26 18:19:00,947 | ❌ Jupiter quote: HTTPSConnectionPool(host='quote-api.jup.ag', port=443): Max retries exceeded with url: /v6/quote?inputMint=So11111111111111111111111111111111111111112&outputMint=72ZvWeeeeG39N4SceLUpE2C3v3cYvyaZDtrAv6dcpump&amount=37100000&slippageBps=500&onlyDirectRoutes=false (Caused by NewConnectionError('<urllib3.connection.HTTPSConnection object at 0x108e7a1f0>: Failed to establish a new connection: [Errno 8] nodename nor servname provided, or not known'))
+2026-03-26 18:19:00,947 | ⚡ SNIPE — NEFE | AntiRug: 93 | RugCheck: 501
+2026-03-26 18:39:01,404 | API erreur: ('Connection aborted.', ConnectionResetError(54, 'Connection reset by peer'))
+2026-03-26 19:06:52,148 | 🛒 ACHAT RÉEL — SXAI
+2026-03-26 19:06:52,150 |    Montant : 0.0371 SOL
+2026-03-26 19:06:52,150 |    Token   : 6HWBJxbVUR9ipMxKdmkw...
+2026-03-26 19:06:52,154 | ❌ Jupiter quote: HTTPSConnectionPool(host='quote-api.jup.ag', port=443): Max retries exceeded with url: /v6/quote?inputMint=So11111111111111111111111111111111111111112&outputMint=6HWBJxbVUR9ipMxKdmkwiRxdsntWhFFFGmSNjXe3pump&amount=37100000&slippageBps=500&onlyDirectRoutes=false (Caused by NewConnectionError('<urllib3.connection.HTTPSConnection object at 0x108e86ca0>: Failed to establish a new connection: [Errno 8] nodename nor servname provided, or not known'))
+2026-03-26 19:06:52,154 | ⚡ SNIPE — SXAI | AntiRug: 93 | RugCheck: 501
+2026-03-26 19:07:46,130 |   ⚠️  Risques détectés — Shika-yan
+2026-03-26 19:07:46,314 | 🛒 ACHAT RÉEL — Shika-yan
+2026-03-26 19:07:46,315 |    Montant : 0.0371 SOL
+2026-03-26 19:07:46,315 |    Token   : Hkp22BRjyvQQfHzA6t7A...
+2026-03-26 19:07:46,319 | ❌ Jupiter quote: HTTPSConnectionPool(host='quote-api.jup.ag', port=443): Max retries exceeded with url: /v6/quote?inputMint=So11111111111111111111111111111111111111112&outputMint=Hkp22BRjyvQQfHzA6t7ALUuU52gRetjS1xho23r4pump&amount=37100000&slippageBps=500&onlyDirectRoutes=false (Caused by NewConnectionError('<urllib3.connection.HTTPSConnection object at 0x108e86040>: Failed to establish a new connection: [Errno 8] nodename nor servname provided, or not known'))
+2026-03-26 19:07:46,319 | ⚡ SNIPE — Shika-yan | AntiRug: 90 | RugCheck: 1
+2026-03-26 19:55:03,546 | API erreur: ('Connection aborted.', ConnectionResetError(54, 'Connection reset by peer'))

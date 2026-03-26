@@ -38,7 +38,7 @@ CONFIG = {
     "min_liquidity_usd":      5_000,
     "max_liquidity_usd":    500_000,
     "min_score":                 80,
-    "max_top_holder_pct":        20,
+    "max_top_holder_pct":        30,
     "stop_loss_pct":            -20,
     "breakeven_trigger_x":      1.17,
     "max_hold_minutes":          120,
