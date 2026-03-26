@@ -64,13 +64,18 @@ class SolanaExecutor:
             key_str = self.private_key_str.strip()
 
             if key_str.startswith("["):
-                # Format array JSON [1,2,3,...]
                 key_bytes = bytes(json.loads(key_str))
             else:
-                # Format base58
                 key_bytes = base58.b58decode(key_str)
 
-            self.keypair = Keypair.from_bytes(key_bytes)
+            # Phantom exporte 32 bytes (seed) ou 64 bytes (keypair complet)
+            if len(key_bytes) == 32:
+                self.keypair = Keypair.from_seed(key_bytes)
+            elif len(key_bytes) == 64:
+                self.keypair = Keypair.from_bytes(key_bytes)
+            else:
+                # Essai avec from_seed sur les 32 premiers bytes
+                self.keypair = Keypair.from_seed(key_bytes[:32])
             log.info(f"✅ Wallet initialisé : {str(self.keypair.pubkey())[:20]}...")
 
         except ImportError:
