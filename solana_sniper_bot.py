@@ -1,16 +1,13 @@
 """
 ╔══════════════════════════════════════════════════════════════════╗
-║           SOLANA SNIPER BOT v6 — ANTI-HONEYPOT + TP DYNAMIQUE  ║
-║           Nouveautés :                                          ║
-║           - Vérification honeypot (RugCheck API)               ║
-║           - Analyse contrat (permissions dangereuses)          ║
-║           - LP : brûlés +25pts / verrouillés +15pts            ║
-║           - TP dynamique selon momentum (analyse 2sec)         ║
+║           SOLANA SNIPER BOT — SIMULATION MODE                   ║
+║           Stratégie : Achat < 30sec après lancement             ║
+║           Break-Even + Protection 2sec + TP progressifs         ║
+║           TP0: +17%→20% | TP1: +50%→30% |                      ║
+║           TP2: +200%→20% | TP3: +900%→reste                    ║
 ╚══════════════════════════════════════════════════════════════════╝
 """
 
-import os
-import sys
 import time
 import random
 import logging
@@ -21,37 +18,23 @@ from colorama import Fore, Style, init
 
 init(autoreset=True)
 
-# Import executor (trading réel)
-try:
-    from solana_executor import SolanaExecutor
-    EXECUTOR_AVAILABLE = True
-except ImportError:
-    EXECUTOR_AVAILABLE = False
-
-WALLET_KEY = os.getenv("WALLET_PRIVATE_KEY")
-REAL_MODE  = WALLET_KEY is not None
-print(f"  Mode : {'🔴 TRADING RÉEL' if REAL_MODE else '🎮 SIMULATION'}")
-
 CONFIG = {
-    "initial_capital_sol":      50.0,
-    "max_positions":             3,
-    "min_liquidity_usd":      5_000,
-    "max_liquidity_usd":    500_000,
-    "min_score":                 80,
-    "max_top_holder_pct":        30,
-    "stop_loss_pct":            -20,
-    "breakeven_trigger_x":      1.17,
-    "max_hold_minutes":          120,
-    "scan_interval_sec":           2,
-    "max_token_age_min":          60,
-    "emergency_dump_pct":        -15,
-    "consecutive_drops":           3,
-    "min_drop_per_scan":        -0.02,
-    "rebounds_to_reset":           2,
-    "tp_momentum_low":    1.5,
-    "tp_momentum_mid":    5.0,
-    "tp_momentum_high":  10.0,
-    "tp_momentum_moon":  20.0,
+    "initial_capital_sol":    50.0,
+    "sol_per_trade":           2.0,
+    "max_positions":           3,
+    "min_liquidity_usd":    3_000,
+    "max_liquidity_usd":  100_000,
+    "min_score":               60,
+    "max_top_holder_pct":      20,
+    "stop_loss_pct":          -25,
+    "breakeven_trigger_x":    1.15,
+    "take_profit_0":           1.17,   # Vend 20% à +17%
+    "take_profit_1":           1.50,   # Vend 30% à +50%
+    "take_profit_2":           3.00,   # Vend 20% à +200%
+    "take_profit_3":          10.00,   # Vend le reste à +900%
+    "max_hold_minutes":        120,
+    "scan_interval_sec":         2,
+    "max_token_age_sec":        30,
 }
 
 logging.basicConfig(
@@ -65,344 +48,6 @@ logging.basicConfig(
 log = logging.getLogger("SNIPER")
 
 
-# ─────────────────────────────────────────────────────────────────
-# HONEYPOT & CONTRACT ANALYZER
-# ─────────────────────────────────────────────────────────────────
-class HoneypotAnalyzer:
-    """
-    Vérifie via RugCheck.xyz et Jupiter :
-    1. Si le token est un honeypot (impossible à revendre)
-    2. Les permissions dangereuses du contrat
-    3. La taxe de vente cachée
-    4. Si le créateur peut bloquer les transferts
-    """
-
-    def check_whale_lock(self, token_address: str) -> dict:
-        """
-        Vérifie si les tokens du top holder sont verrouillés.
-        Utilise RugCheck API pour obtenir les infos de vesting.
-        Retourne: locked=True si verrouillés 6+ mois
-        """
-        result = {
-            "locked":        False,
-            "lock_months":   0,
-            "lock_details":  "Inconnu",
-        }
-        try:
-            r = requests.get(
-                f"https://api.rugcheck.xyz/v1/tokens/{token_address}/report",
-                timeout=8,
-                headers={"User-Agent": "Mozilla/5.0"}
-            )
-            if r.status_code == 200:
-                data    = r.json()
-                markets = data.get("markets", [])
-                lp_info = data.get("lpLockedPct", 0)
-
-                # Vérifie le lock des LP
-                if lp_info >= 80:
-                    result["locked"]       = True
-                    result["lock_details"] = f"LP verrouillés à {lp_info:.0f}%"
-                    result["lock_months"]  = 6  # Assumé si LP > 80%
-
-                # Vérifie le vesting des holders
-                for market in markets:
-                    locks = market.get("lp", {}).get("lockedPct", 0)
-                    if locks >= 80:
-                        result["locked"]       = True
-                        result["lock_details"] = f"Tokens verrouillés {locks:.0f}%"
-                        result["lock_months"]  = 6
-
-                # Vérifie dans les risques
-                risks = data.get("risks", [])
-                for risk in risks:
-                    name = risk.get("name", "").lower()
-                    if "lock" in name or "vest" in name:
-                        result["locked"]       = True
-                        result["lock_details"] = risk.get("description", "Tokens verrouillés")
-
-        except Exception as e:
-            result["lock_details"] = f"API indisponible: {str(e)[:30]}"
-
-        return result
-
-    def check(self, token_address: str, symbol: str) -> dict:
-        result = {
-            "is_honeypot":      False,
-            "can_sell":         True,
-            "sell_tax":         0,
-            "dangerous_perms":  [],
-            "rugcheck_score":   0,
-            "safe":             True,
-            "details":          {},
-        }
-
-        # ── Check 1 : RugCheck.xyz API ────────────────────────
-        try:
-            r = requests.get(
-                f"https://api.rugcheck.xyz/v1/tokens/{token_address}/report",
-                timeout=8,
-                headers={"User-Agent": "Mozilla/5.0"}
-            )
-            if r.status_code == 200:
-                data  = r.json()
-                risks = data.get("risks", [])
-
-                # Analyse des risques détectés
-                for risk in risks:
-                    name  = risk.get("name", "").lower()
-                    level = risk.get("level", "").lower()
-
-                    # Honeypot détecté
-                    if "honeypot" in name or "freeze" in name:
-                        result["is_honeypot"]   = True
-                        result["can_sell"]       = False
-                        result["safe"]           = False
-                        result["dangerous_perms"].append(f"🚨 HONEYPOT: {risk.get('name')}")
-
-                    # Mint authority active
-                    elif "mint" in name and level in ["danger", "warn"]:
-                        result["dangerous_perms"].append(f"⚠️ Mint active")
-
-                    # Blacklist function
-                    elif "blacklist" in name:
-                        result["safe"] = False
-                        result["dangerous_perms"].append(f"🚨 Blacklist possible")
-
-                    # Taxe élevée
-                    elif "tax" in name or "fee" in name:
-                        result["dangerous_perms"].append(f"⚠️ Taxe détectée")
-
-                # Score RugCheck
-                score = data.get("score", 0)
-                result["rugcheck_score"] = score
-
-                if score >= 80:
-                    result["details"]["RugCheck"] = f"✅ Score {score}/100 — sûr"
-                elif score >= 50:
-                    result["details"]["RugCheck"] = f"⚠️  Score {score}/100 — risque modéré"
-                else:
-                    result["safe"]  = False
-                    result["details"]["RugCheck"] = f"❌ Score {score}/100 — dangereux"
-
-        except Exception as e:
-            result["details"]["RugCheck"] = f"⚠️  API indisponible ({str(e)[:30]})"
-
-        # ── Check 2 : Simulation vente via Jupiter ────────────
-        try:
-            # Simule un swap token → SOL pour vérifier que c'est possible
-            r = requests.get(
-                f"https://quote-api.jup.ag/v6/quote"
-                f"?inputMint={token_address}"
-                f"&outputMint=So11111111111111111111111111111111111111112"
-                f"&amount=1000000"
-                f"&slippageBps=500",
-                timeout=8
-            )
-            if r.status_code == 200:
-                data = r.json()
-                if data.get("routePlan") or data.get("outAmount"):
-                    result["can_sell"] = True
-                    result["details"]["Vente simulée"] = "✅ Revente possible via Jupiter"
-                else:
-                    result["can_sell"]    = False
-                    result["is_honeypot"] = True
-                    result["safe"]        = False
-                    result["details"]["Vente simulée"] = "❌ IMPOSSIBLE de revendre !"
-            elif r.status_code == 400:
-                result["can_sell"]    = False
-                result["is_honeypot"] = True
-                result["safe"]        = False
-                result["details"]["Vente simulée"] = "❌ Token non vendable (400)"
-            else:
-                result["details"]["Vente simulée"] = f"⚠️  Simulation impossible ({r.status_code})"
-
-        except Exception as e:
-            result["details"]["Vente simulée"] = f"⚠️  Jupiter indisponible"
-
-        # ── Résultat final ────────────────────────────────────
-        if result["is_honeypot"]:
-            log.warning(f"  🚨 HONEYPOT DÉTECTÉ — {symbol} | Achat BLOQUÉ")
-        elif not result["safe"]:
-            log.warning(f"  ⚠️  Risques détectés — {symbol}")
-
-        return result
-
-
-# ─────────────────────────────────────────────────────────────────
-# MOMENTUM ANALYZER
-# ─────────────────────────────────────────────────────────────────
-class MomentumAnalyzer:
-
-    def analyze(self, pos: dict, live_data: dict) -> dict:
-        score      = 0
-        details    = {}
-        price_hist = pos.get("price_history", [1.0])
-        vol_hist   = pos.get("volume_history", [0])
-        current_x  = pos.get("current_x", 1.0)
-        prev_x     = price_hist[-2] if len(price_hist) >= 2 else 1.0
-
-        # Vélocité du prix
-        velocity = (current_x - prev_x) / max(prev_x, 1e-10) * 100
-        if velocity >= 5:
-            score += 30
-            details["Vélocité"] = f"✅ +{velocity:.1f}%/scan (+30pts)"
-        elif velocity >= 2:
-            score += 20
-            details["Vélocité"] = f"✅ +{velocity:.1f}%/scan (+20pts)"
-        elif velocity >= 0:
-            score += 10
-            details["Vélocité"] = f"⚠️  +{velocity:.1f}%/scan (+10pts)"
-        else:
-            details["Vélocité"] = f"❌ {velocity:.1f}%/scan"
-
-        # Accélération volume
-        curr_vol  = live_data.get("volume_5m", 0)
-        prev_vol  = vol_hist[-1] if vol_hist else curr_vol
-        vol_accel = curr_vol / max(prev_vol, 1) if prev_vol > 0 else 1
-        if vol_accel >= 3:
-            score += 30
-            details["Volume"] = f"✅ x{vol_accel:.1f} (+30pts) 🔥"
-        elif vol_accel >= 2:
-            score += 20
-            details["Volume"] = f"✅ x{vol_accel:.1f} (+20pts)"
-        elif vol_accel >= 1:
-            score += 10
-            details["Volume"] = f"⚠️  x{vol_accel:.1f} (+10pts)"
-        else:
-            details["Volume"] = f"❌ volume baisse"
-
-        # Ratio acheteurs
-        buys  = live_data.get("buys", 0)
-        sells = live_data.get("sells", 1)
-        ratio = buys / max(buys + sells, 1) * 100
-        if ratio >= 80:
-            score += 25
-            details["Buyers"] = f"✅ {ratio:.0f}% (+25pts) 🚀"
-        elif ratio >= 65:
-            score += 15
-            details["Buyers"] = f"✅ {ratio:.0f}% (+15pts)"
-        elif ratio >= 50:
-            score += 5
-            details["Buyers"] = f"⚠️  {ratio:.0f}% (+5pts)"
-        else:
-            details["Buyers"] = f"❌ {ratio:.0f}% vendeurs"
-
-        # Liquidité
-        curr_liq  = live_data.get("liquidity_usd", 0)
-        prev_liq  = pos.get("entry_liquidity", curr_liq)
-        liq_growth = (curr_liq - prev_liq) / max(prev_liq, 1) * 100
-        if liq_growth >= 10:
-            score += 15
-            details["Liquidité"] = f"✅ +{liq_growth:.1f}% (+15pts)"
-        elif liq_growth >= 0:
-            score += 8
-            details["Liquidité"] = f"⚠️  stable (+8pts)"
-        else:
-            details["Liquidité"] = f"❌ baisse liquidité"
-
-        score = min(100, score)
-
-        if score >= 80:
-            tp, label = CONFIG["tp_momentum_moon"], "🚀 MOONSHOT 20x"
-        elif score >= 60:
-            tp, label = CONFIG["tp_momentum_high"], "⭐ HIGH 10x"
-        elif score >= 40:
-            tp, label = CONFIG["tp_momentum_mid"],  "📈 MID 5x"
-        else:
-            tp, label = CONFIG["tp_momentum_low"],  "⚡ LOW 1.5x"
-
-        pos["volume_history"] = (vol_hist + [curr_vol])[-10:]
-        return {"score": score, "dynamic_tp": tp, "tp_label": label, "details": details}
-
-
-# ─────────────────────────────────────────────────────────────────
-# ANTI-RUG ANALYZER
-# ─────────────────────────────────────────────────────────────────
-class AntiRugAnalyzer:
-
-    def analyze(self, token: dict) -> dict:
-        score   = 0
-        flags   = []
-        details = {}
-
-        # Mint Authority
-        mint_ok = token.get("mint_disabled", random.random() > 0.4)
-        if mint_ok:
-            score += 25
-            details["Mint Authority"] = "✅ Désactivée (+25pts)"
-        else:
-            flags.append("MINT_ACTIVE")
-            details["Mint Authority"] = "❌ ACTIVE — risque"
-
-        # LP Tokens — règle assouplie
-        liq = token.get("liquidity_usd", 0)
-        lp_ok = token.get("lp_burned", random.random() > 0.5)
-        if lp_ok:
-            score += 25
-            details["LP Tokens"] = "✅ Brûlés (+25pts)"
-        elif liq >= 20_000:
-            # LP non brûlés mais liquidité élevée = verrouillés probablement
-            score += 15
-            details["LP Tokens"] = f"⚠️  Non brûlés mais liq ${liq:,.0f} (+15pts)"
-        else:
-            flags.append("LP_NOT_BURNED")
-            details["LP Tokens"] = f"❌ Non brûlés + liq faible (0pts)"
-
-        # Top Holder
-        top_h = token.get("top_holder_pct", random.uniform(5, 60))
-        if top_h <= CONFIG["max_top_holder_pct"]:
-            score += 20
-            details["Top Holder"] = f"✅ {top_h:.1f}% (+20pts)"
-        else:
-            flags.append("WHALE_CONCENTRATION")
-            details["Top Holder"] = f"❌ {top_h:.1f}% — dangereux"
-
-        # Liquidité
-        if CONFIG["min_liquidity_usd"] <= liq <= CONFIG["max_liquidity_usd"]:
-            score += 15
-            details["Liquidité"] = f"✅ ${liq:,.0f} (+15pts)"
-        elif liq < CONFIG["min_liquidity_usd"]:
-            flags.append("LOW_LIQUIDITY")
-            details["Liquidité"] = f"❌ ${liq:,.0f} trop faible"
-        else:
-            score += 8
-            details["Liquidité"] = f"⚠️  ${liq:,.0f} (+8pts)"
-
-        # Buy Pressure
-        buys  = token.get("buys", 0)
-        sells = token.get("sells", 1)
-        ratio = buys / max(buys + sells, 1)
-        if ratio >= 0.65:
-            score += 15
-            details["Buy Pressure"] = f"✅ {ratio*100:.0f}% (+15pts)"
-        elif ratio >= 0.50:
-            score += 8
-            details["Buy Pressure"] = f"⚠️  {ratio*100:.0f}% (+8pts)"
-        else:
-            flags.append("SELL_PRESSURE")
-            details["Buy Pressure"] = f"❌ {ratio*100:.0f}%"
-
-        # Seul WHALE_CONCENTRATION bloque vraiment
-        # Si WHALE_CONCENTRATION est le seul problème
-        # vérifie si les tokens sont verrouillés
-        if "WHALE_CONCENTRATION" in flags:
-            other_flags = [f for f in flags if f != "WHALE_CONCENTRATION"]
-            if not other_flags and score >= CONFIG["min_score"]:
-                # Whale présente MAIS tokens peut-être verrouillés
-                # La vérification réelle se fait dans HoneypotAnalyzer
-                flags.append("CHECK_WHALE_LOCK")
-
-        buyable = (score >= CONFIG["min_score"] and
-                   "WHALE_CONCENTRATION" not in flags)
-
-        return {"score": score, "details": details,
-                "flags": flags, "buyable": buyable}
-
-
-# ─────────────────────────────────────────────────────────────────
-# WALLET SIMULÉ
-# ─────────────────────────────────────────────────────────────────
 class SniperWallet:
 
     def __init__(self, initial_sol: float):
@@ -416,50 +61,30 @@ class SniperWallet:
         self.rugs          = 0
 
     def can_snipe(self) -> bool:
-        return (self.sol_balance > 0.01 and
+        return (self.sol_balance >= CONFIG["sol_per_trade"] and
                 len(self.positions) < CONFIG["max_positions"])
 
-    def open_position(self, token: dict, anti_rug_score: int = 80) -> bool:
+    def open_position(self, token: dict) -> bool:
         if not self.can_snipe():
             return False
-
-        # Taille dynamique selon score
-        if anti_rug_score >= 95:
-            pct, label = 0.20, "20% (exceptionnel)"
-        elif anti_rug_score >= 90:
-            pct, label = 0.15, "15% (fort)"
-        else:
-            pct, label = 0.10, "10% (moyen)"
-
-        amount = round(self.sol_balance * pct, 4)
-        if amount <= 0.001:
-            return False
-
-        print(f"  📐 Position : {label} = {amount:.4f} SOL")
+        amount = CONFIG["sol_per_trade"]
         self.sol_balance -= amount
         self.total_trades += 1
         self.positions[token["address"]] = {
-            "symbol":               token["symbol"],
-            "address":              token["address"],
-            "entry_price":          token["price_usd"],
-            "entry_time":           datetime.now(timezone.utc),
-            "entry_liquidity":      token.get("liquidity_usd", 0),
-            "sol_invested":         amount,
-            "remaining_pct":        100.0,
-            "current_x":            1.0,
-            "peak_x":               1.0,
-            "prev_x":               1.0,
-            "consecutive_drops":    0,
-            "consecutive_rebounds": 0,
-            "price_history":        [1.0],
-            "volume_history":       [token.get("volume_5m", 0)],
-            "is_real":              token.get("is_real", False),
-            "is_rug":               token.get("will_rug", False),
-            "breakeven_active":     False,
-            "dynamic_tp":           CONFIG["tp_momentum_mid"],
-            "tp_label":             "📈 MID 5x",
-            "momentum_score":       50,
-            "partial_sold":         False,
+            "symbol":           token["symbol"],
+            "address":          token["address"],
+            "entry_price":      token["price_usd"],
+            "entry_time":       datetime.now(timezone.utc),
+            "sol_invested":     amount,
+            "remaining_pct":    100.0,
+            "tp0_hit":          False,
+            "tp1_hit":          False,
+            "tp2_hit":          False,
+            "tp3_hit":          False,
+            "current_x":        1.0,
+            "peak_x":           1.0,
+            "is_rug":           token.get("will_rug", False),
+            "breakeven_active": False,
         }
         return True
 
@@ -481,18 +106,16 @@ class SniperWallet:
             self.losses += 1
 
         duration = (datetime.now(timezone.utc) - pos["entry_time"]).seconds
-        source   = "🌐" if pos.get("is_real") else "🎮"
         self.closed_trades.append({
             "symbol":     pos["symbol"],
             "exit_x":     round(actual_x, 3),
             "pnl_sol":    round(pnl_sol, 4),
             "reason":     reason,
             "duration_s": duration,
-            "source":     source,
         })
 
         emoji = "🟢" if actual_x >= 1 else "🔴"
-        log.info(f"  {emoji} FERMÉ {source} — {pos['symbol']} | {actual_x:.2f}x | "
+        log.info(f"  {emoji} FERMÉ — {pos['symbol']} | {actual_x:.2f}x | "
                  f"P&L: {pnl_sol:+.4f} SOL | {reason}")
         del self.positions[address]
 
@@ -508,9 +131,6 @@ class SniperWallet:
                  f"{current_x:.2f}x | +{sol_received:.4f} SOL | {reason}")
 
 
-# ─────────────────────────────────────────────────────────────────
-# DÉTECTEUR NOUVEAUX POOLS
-# ─────────────────────────────────────────────────────────────────
 class NewPoolDetector:
 
     def __init__(self):
@@ -520,153 +140,183 @@ class NewPoolDetector:
 
     def _update_sol_price(self):
         try:
-            r = requests.get(
-                "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd",
-                timeout=5
-            )
+            url = "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd"
+            r   = requests.get(url, timeout=5)
             if r.status_code == 200:
                 self.sol_usd = r.json()["solana"]["usd"]
         except Exception:
             pass
 
     def scan_new_pools(self) -> list:
-        tokens = []
         try:
-            r = requests.get(
-                "https://api.dexscreener.com/token-profiles/latest/v1",
-                timeout=10,
-                headers={"User-Agent": "Mozilla/5.0"}
-            )
+            url = "https://api.dexscreener.com/latest/dex/search?q=raydium+solana"
+            r   = requests.get(url, timeout=8)
             if r.status_code != 200:
-                return []
-
-            profiles = r.json() if isinstance(r.json(), list) else []
-
-            for profile in profiles[:15]:
-                if profile.get("chainId") != "solana":
+                return self._simulate_new_launches()
+            pairs     = r.json().get("pairs", [])
+            new_pools = []
+            for pair in pairs:
+                if pair.get("chainId") != "solana":
                     continue
-                addr = profile.get("tokenAddress", "")
-                if not addr or addr in self.seen:
-                    continue
-
-                r2 = requests.get(
-                    f"https://api.dexscreener.com/latest/dex/tokens/{addr}",
-                    timeout=8,
-                    headers={"User-Agent": "Mozilla/5.0"}
-                )
-                if r2.status_code != 200:
-                    continue
-
-                pairs     = r2.json().get("pairs", None) or []
-                sol_pairs = [p for p in pairs if p.get("chainId") == "solana"]
-                if not sol_pairs:
-                    continue
-
-                pair    = sol_pairs[0]
-                liq     = float(pair.get("liquidity", {}).get("usd", 0) or 0)
-                vol     = pair.get("volume", {})
-                txns    = pair.get("txns", {})
-                m5      = txns.get("m5", {})
                 created = pair.get("pairCreatedAt", 0)
-                now_ms  = time.time() * 1000
-                age_min = (now_ms - created) / 60000 if created else 0
-
-                token = {
-                    "address":        addr,
-                    "symbol":         pair.get("baseToken", {}).get("symbol", "???"),
-                    "name":           pair.get("baseToken", {}).get("name", "Unknown"),
-                    "price_usd":      float(pair.get("priceUsd", 0) or 0),
-                    "liquidity_usd":  liq,
-                    "volume_5m":      float(vol.get("m5", 0) or 0),
-                    "volume_1h":      float(vol.get("h1", 0) or 0),
-                    "buys":           int(m5.get("buys", 0) or 0),
-                    "sells":          int(m5.get("sells", 0) or 0),
-                    "age_min":        round(age_min, 1),
-                    "age_sec":        age_min * 60,
-                    "is_real":        True,
-                    "will_rug":       False,
-                    "dex_url":        pair.get("url", ""),
-                }
-
-                if token["price_usd"] > 0 and token["liquidity_usd"] > 0:
-                    tokens.append(token)
-                    print(f"  🌐 VRAI TOKEN : {token['symbol']} | "
-                          f"${liq:,.0f} liq | {age_min:.1f}min")
-
-                time.sleep(0.5)
-
-        except Exception as e:
-            log.error(f"API erreur: {e}")
-
-        return tokens
-
-    def get_live_price_data(self, address: str) -> dict:
-        try:
-            r = requests.get(
-                f"https://api.dexscreener.com/latest/dex/tokens/{address}",
-                timeout=5,
-                headers={"User-Agent": "Mozilla/5.0"}
-            )
-            if r.status_code == 200:
-                pairs     = r.json().get("pairs", None) or []
-                sol_pairs = [p for p in pairs if p.get("chainId") == "solana"]
-                if sol_pairs:
-                    pair = sol_pairs[0]
-                    return {
-                        "price_usd":     float(pair.get("priceUsd", 0) or 0),
-                        "liquidity_usd": float(pair.get("liquidity", {}).get("usd", 0) or 0),
-                        "volume_5m":     float(pair.get("volume", {}).get("m5", 0) or 0),
-                        "buys":          int(pair.get("txns", {}).get("m5", {}).get("buys", 0) or 0),
-                        "sells":         int(pair.get("txns", {}).get("m5", {}).get("sells", 0) or 0),
-                    }
+                if not created:
+                    continue
+                age_sec = (time.time() * 1000 - created) / 1000
+                if age_sec > CONFIG["max_token_age_sec"]:
+                    continue
+                addr = pair.get("baseToken", {}).get("address", "")
+                if addr in self.seen:
+                    continue
+                token = self._parse(pair, age_sec)
+                if token:
+                    new_pools.append(token)
+            return new_pools if new_pools else self._simulate_new_launches()
         except Exception:
-            pass
-        return {}
+            return self._simulate_new_launches()
+
+    def _parse(self, pair: dict, age_sec: float) -> dict:
+        try:
+            base = pair.get("baseToken", {})
+            liq  = float(pair.get("liquidity", {}).get("usd", 0) or 0)
+            return {
+                "address":       base.get("address", ""),
+                "symbol":        base.get("symbol", "???"),
+                "name":          base.get("name", "Unknown"),
+                "price_usd":     float(pair.get("priceUsd", 0) or 0),
+                "liquidity_usd": liq,
+                "volume_1h":     float(pair.get("volume", {}).get("h1", 0) or 0),
+                "age_sec":       age_sec,
+                "buys":          pair.get("txns", {}).get("m5", {}).get("buys", 0),
+                "sells":         pair.get("txns", {}).get("m5", {}).get("sells", 0),
+                "will_rug":      False,
+            }
+        except Exception:
+            return None
+
+    def _simulate_new_launches(self) -> list:
+        if random.random() > 0.04:
+            return []
+        syms   = ["MOONDOG", "SOLCAT", "PEPEX", "WAGMISOL", "GIGASOL",
+                  "DEGENCAT", "BONKX", "RAYCAT", "SOLPUMP", "MEMEX"]
+        sym    = random.choice(syms)
+        liq    = random.uniform(3_000, 80_000)
+        is_rug = random.random() < 0.60
+        return [{
+            "address":        f"Snipe{random.randint(100000,999999)}pump",
+            "symbol":         sym,
+            "name":           f"{sym} Token",
+            "price_usd":      random.uniform(0.0000001, 0.0001),
+            "liquidity_usd":  liq,
+            "volume_1h":      liq * random.uniform(0.1, 2.0),
+            "age_sec":        random.uniform(1, 28),
+            "buys":           random.randint(50, 300) if is_rug else random.randint(20, 150),
+            "sells":          random.randint(5, 50),
+            "top_holder_pct": random.uniform(25, 80) if is_rug else random.uniform(5, 18),
+            "mint_disabled":  not is_rug,
+            "lp_burned":      not is_rug,
+            "will_rug":       is_rug,
+        }]
 
 
-# ─────────────────────────────────────────────────────────────────
-# PROTECTION COMPORTEMENTALE
-# ─────────────────────────────────────────────────────────────────
-def check_behavioral_protection(pos: dict, x: float) -> tuple:
-    prev_x = pos.get("prev_x", 1.0)
+class AntiRugAnalyzer:
 
-    if x <= (1 + CONFIG["emergency_dump_pct"] / 100):
-        return True, f"🚨 Dump urgent {(x-1)*100:.1f}%"
+    def analyze(self, token: dict) -> dict:
+        score   = 0
+        flags   = []
+        details = {}
 
-    drop = (x - prev_x) / max(prev_x, 1e-10)
+        mint_ok = token.get("mint_disabled", random.random() > 0.4)
+        if mint_ok:
+            score += 25
+            details["Mint Authority"] = "✅ Désactivée (+25pts)"
+        else:
+            flags.append("MINT_ACTIVE")
+            details["Mint Authority"] = "❌ ACTIVE — risque élevé"
 
-    if drop <= CONFIG["min_drop_per_scan"]:
-        pos["consecutive_drops"]    += 1
-        pos["consecutive_rebounds"]  = 0
-    elif drop > 0:
-        pos["consecutive_rebounds"] += 1
-        if pos["consecutive_rebounds"] >= CONFIG["rebounds_to_reset"]:
-            pos["consecutive_drops"]    = 0
-            pos["consecutive_rebounds"] = 0
+        lp_ok = token.get("lp_burned", random.random() > 0.5)
+        if lp_ok:
+            score += 25
+            details["LP Tokens"] = "✅ Brûlés (+25pts)"
+        else:
+            flags.append("LP_NOT_BURNED")
+            details["LP Tokens"] = "⚠️  Non brûlés"
 
-    if pos["consecutive_drops"] >= CONFIG["consecutive_drops"]:
-        return True, f"📉 {pos['consecutive_drops']} baisses consécutives"
+        top_h = token.get("top_holder_pct", random.uniform(5, 60))
+        if top_h <= CONFIG["max_top_holder_pct"]:
+            score += 20
+            details["Top Holder"] = f"✅ {top_h:.1f}% (+20pts)"
+        else:
+            flags.append("WHALE_CONCENTRATION")
+            details["Top Holder"] = f"❌ {top_h:.1f}% — dangereux"
 
-    pos["prev_x"] = x
-    return False, ""
+        liq = token["liquidity_usd"]
+        if CONFIG["min_liquidity_usd"] <= liq <= CONFIG["max_liquidity_usd"]:
+            score += 15
+            details["Liquidité"] = f"✅ ${liq:,.0f} (+15pts)"
+        elif liq < CONFIG["min_liquidity_usd"]:
+            flags.append("LOW_LIQUIDITY")
+            details["Liquidité"] = f"❌ ${liq:,.0f} trop faible"
+        else:
+            score += 8
+            details["Liquidité"] = f"⚠️  ${liq:,.0f} élevée (+8pts)"
+
+        buys  = token.get("buys", 0)
+        sells = token.get("sells", 1)
+        ratio = buys / max(buys + sells, 1)
+        if ratio >= 0.65:
+            score += 15
+            details["Buy Pressure"] = f"✅ {ratio*100:.0f}% (+15pts)"
+        elif ratio >= 0.50:
+            score += 8
+            details["Buy Pressure"] = f"⚠️  {ratio*100:.0f}% (+8pts)"
+        else:
+            flags.append("SELL_PRESSURE")
+            details["Buy Pressure"] = f"❌ {ratio*100:.0f}%"
+
+        buyable = (score >= CONFIG["min_score"] and
+                   "MINT_ACTIVE" not in flags and
+                   "WHALE_CONCENTRATION" not in flags)
+
+        return {"score": score, "details": details,
+                "flags": flags, "buyable": buyable}
 
 
-# ─────────────────────────────────────────────────────────────────
-# DASHBOARD
-# ─────────────────────────────────────────────────────────────────
+class PriceSimulator:
+
+    def get_current_x(self, pos: dict) -> float:
+        age_s  = (datetime.now(timezone.utc) - pos["entry_time"]).seconds
+        is_rug = pos.get("is_rug", False)
+        peak   = pos.get("peak_x", 1.0)
+
+        if is_rug:
+            if age_s < 60:
+                x = 1.0 + (age_s / 60) * random.uniform(0.5, 3.0)
+            else:
+                x = max(0.05, peak * np.exp(-age_s / 120 * random.uniform(1, 3)))
+        else:
+            sigma = 0.08
+            drift = 0.003
+            steps = max(1, age_s // 5)
+            x     = 1.0
+            for _ in range(steps):
+                x *= np.exp(np.random.normal(drift, sigma))
+                x  = max(x, 0.1)
+
+        return round(x, 4)
+
+
 def print_dashboard(wallet: SniperWallet, sol_price: float):
     total_sol = wallet.sol_balance + sum(
         p["sol_invested"] * p.get("current_x", 1) * (p["remaining_pct"] / 100)
         for p in wallet.positions.values()
     )
     pnl_sol   = total_sol - wallet.initial_sol
-    pnl_pct   = pnl_sol / wallet.initial_sol * 100 if wallet.initial_sol > 0 else 0
+    pnl_pct   = pnl_sol / wallet.initial_sol * 100
     wr        = wallet.wins / max(wallet.total_trades, 1) * 100
     pnl_color = Fore.GREEN if pnl_sol >= 0 else Fore.RED
 
     print(f"\n{Fore.CYAN}{'═'*62}")
-    print(f"  🎯 SNIPER BOT v6 — {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"  🛡️  ANTI-HONEYPOT | 📡 TP DYNAMIQUE | 🔍 CONTRAT")
+    print(f"  🎯 SNIPER BOT — {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'═'*62}")
     print(f"  SOL balance      : {wallet.sol_balance:.4f} SOL")
     print(f"  Valeur totale    : {total_sol:.4f} SOL (${total_sol*sol_price:,.2f})")
@@ -681,289 +331,159 @@ def print_dashboard(wallet: SniperWallet, sol_price: float):
             x      = pos.get("current_x", 1.0)
             xcolor = Fore.GREEN if x >= 1 else Fore.RED
             age_s  = (datetime.now(timezone.utc) - pos["entry_time"]).seconds
-            be     = f"{Fore.CYAN}🔒{Style.RESET_ALL}" if pos.get("breakeven_active") else ""
-            tp     = pos.get("tp_label", "")
-            mscore = pos.get("momentum_score", 0)
-            print(f"  {xcolor}  {pos['symbol']:<12} {x:.2f}x | "
+            be     = f"{Fore.CYAN}🔒 BE{Style.RESET_ALL}" if pos.get("breakeven_active") else ""
+            tps    = []
+            if pos["tp0_hit"]: tps.append("TP0")
+            if pos["tp1_hit"]: tps.append("TP1")
+            if pos["tp2_hit"]: tps.append("TP2")
+            tp_str = " ".join(tps)
+            print(f"  {xcolor}  {pos['symbol']:<14} {x:.2f}x | "
+                  f"{pos['sol_invested']:.1f} SOL | "
                   f"Restant: {pos['remaining_pct']:.0f}% | "
-                  f"Mom: {mscore}/100 | {tp} {be}")
+                  f"Age: {age_s}s {be} {tp_str}")
 
     if wallet.closed_trades:
         print(f"\n  📜 DERNIERS TRADES :")
         for t in wallet.closed_trades[-5:]:
             xcolor = Fore.GREEN if t["exit_x"] >= 1 else Fore.RED
-            print(f"  {xcolor}  {t.get('source','🎮')} {t['symbol']:<12} "
-                  f"{t['exit_x']:.2f}x | P&L: {t['pnl_sol']:+.4f} SOL | "
-                  f"{t['reason']}{Style.RESET_ALL}")
+            print(f"  {xcolor}  {t['symbol']:<14} {t['exit_x']:.2f}x | "
+                  f"P&L: {t['pnl_sol']:+.4f} SOL | {t['reason']}{Style.RESET_ALL}")
 
-    print(f"\n  🎯 TP DYNAMIQUES : <40→1.5x | 40-60→5x | 60-80→10x | >80→20x")
-    print(f"  🛡️  PROTECTIONS  : Break-Even +17% | SL -20% | Dump -15%")
+    print(f"\n  📊 GRILLE DES TPs :")
+    print(f"     TP0 : +17%  → vend 20% de la position")
+    print(f"     TP1 : +50%  → vend 30% de la position")
+    print(f"     TP2 : +200% → vend 20% de la position")
+    print(f"     TP3 : +900% → vend le reste")
     print(f"{Fore.CYAN}{'═'*62}{Style.RESET_ALL}\n")
 
 
-# ─────────────────────────────────────────────────────────────────
-# BOUCLE PRINCIPALE
-# ─────────────────────────────────────────────────────────────────
+def print_new_token(token: dict, analysis: dict):
+    score   = analysis["score"]
+    s_color = Fore.GREEN if score >= 60 else Fore.YELLOW if score >= 45 else Fore.RED
+    print(f"\n{Fore.YELLOW}  ━━━ NOUVEAU TOKEN ━━━")
+    print(f"  🚀 {token['symbol']} | Age: {token['age_sec']:.1f}s | "
+          f"Liq: ${token['liquidity_usd']:,.0f}")
+    print(f"  Prix: ${token['price_usd']:.10f}{Style.RESET_ALL}")
+    print(f"  {s_color}📊 SCORE : {score}/100{Style.RESET_ALL}")
+    for k, v in analysis["details"].items():
+        print(f"     {k:<20} {v}")
+    if analysis["flags"]:
+        print(f"  {Fore.RED}🚨 FLAGS : {' | '.join(analysis['flags'])}{Style.RESET_ALL}")
+
+
 def run_sniper(wallet: SniperWallet, detector: NewPoolDetector,
-               rug_analyzer: AntiRugAnalyzer,
-               mom_analyzer: MomentumAnalyzer,
-               hp_analyzer: HoneypotAnalyzer,
-               executor=None):
+               analyzer: AntiRugAnalyzer, simulator: PriceSimulator):
 
     to_close = []
 
-    # ── Mise à jour positions toutes les 2 secondes ──────────
     for address, pos in list(wallet.positions.items()):
-        if pos.get("is_real"):
-            live_data = detector.get_live_price_data(address)
-            if live_data and live_data.get("price_usd", 0) > 0:
-                x = live_data["price_usd"] / max(pos["entry_price"], 1e-12)
-            else:
-                x = pos.get("current_x", 1.0)
-        else:
-            age_s  = (datetime.now(timezone.utc) - pos["entry_time"]).seconds
-            is_rug = pos.get("is_rug", False)
-            peak   = pos.get("peak_x", 1.0)
-            if is_rug:
-                x = max(0.05, peak * np.exp(-age_s / 120)) if age_s >= 60 else 1.0 + (age_s / 60) * 1.5
-            else:
-                x = pos.get("current_x", 1.0) * np.exp(np.random.normal(0.003, 0.04))
-                x = max(x, 0.1)
-            live_data = {}
-
-        x = round(x, 4)
+        x = simulator.get_current_x(pos)
         pos["current_x"] = x
         pos["peak_x"]    = max(pos.get("peak_x", 1.0), x)
-        pos["price_history"].append(x)
-
-        # Analyse momentum
-        mom = mom_analyzer.analyze(pos, live_data or {})
-        old_tp = pos.get("dynamic_tp", 5.0)
-        pos["dynamic_tp"]     = mom["dynamic_tp"]
-        pos["tp_label"]       = mom["tp_label"]
-        pos["momentum_score"] = mom["score"]
-
-        if mom["dynamic_tp"] != old_tp:
-            print(f"  {Fore.YELLOW}📊 TP AJUSTÉ — {pos['symbol']} | "
-                  f"{old_tp}x → {mom['dynamic_tp']}x | "
-                  f"Momentum: {mom['score']}/100{Style.RESET_ALL}")
-
         age_sec = (datetime.now(timezone.utc) - pos["entry_time"]).seconds
         age_min = age_sec / 60
 
-        # Protection comportementale
-        should_sell, reason = check_behavioral_protection(pos, x)
-        if should_sell:
-            to_close.append((address, x, reason, None))
+        # ── Protection 2 secondes : -3% → vente immédiate ────
+        if age_sec <= 2 and x <= 0.97:
+            to_close.append((address, x, "⚡ Protection 2sec -3%", None))
             continue
 
-        # Break-Even +17%
+        # ── Break-Even : activation dès +15% ─────────────────
         if x >= CONFIG["breakeven_trigger_x"] and not pos["breakeven_active"]:
             pos["breakeven_active"] = True
-            print(f"  {Fore.CYAN}🔒 BREAK-EVEN — {pos['symbol']} | SL = prix d'entrée{Style.RESET_ALL}")
+            log.info(f"  🔒 BREAK-EVEN activé — {pos['symbol']} | "
+                     f"+{(x-1)*100:.0f}% atteint → SL = prix d'entrée")
+            print(f"  {Fore.CYAN}🔒 BREAK-EVEN activé — {pos['symbol']} | "
+                  f"Stop Loss déplacé au prix d'entrée{Style.RESET_ALL}")
 
+        # ── Break-Even déclenché : sortie FORCÉE à 1.0x ──────
         if pos["breakeven_active"] and x < 1.0:
             to_close.append((address, x, "🔒 Break-Even — sortie sans perte", 1.0))
             continue
 
-        # Stop Loss -20%
+        # ── Stop Loss normal ──────────────────────────────────
         if x <= (1 + CONFIG["stop_loss_pct"] / 100):
-            reason = "Rug Pull 💀" if pos.get("is_rug") else "Stop Loss -20%"
+            reason = "Rug Pull 💀" if pos.get("is_rug") else "Stop Loss -25%"
             to_close.append((address, x, reason, None))
             continue
 
-        # Temps max
+        # ── Vente forcée après 2h ─────────────────────────────
         if age_min >= CONFIG["max_hold_minutes"]:
             to_close.append((address, x, "⏰ Temps max dépassé", None))
             continue
 
-        # TP Dynamique
-        if x >= pos["dynamic_tp"]:
-            if executor and executor.enabled and pos.get("is_real"):
-                print(f"  🔴 Vente réelle — {pos['symbol']} à {x:.2f}x")
-                sell_result = executor.sell_all_token(address, pos["symbol"])
-                if sell_result["success"]:
-                    print(f"  ✅ VENTE RÉELLE CONFIRMÉE !")
-                    print(f"  🔗 https://solscan.io/tx/{sell_result['tx_hash']}")
-            to_close.append((address, x, f"🎯 {pos['tp_label']} ! {x:.2f}x", None))
-            continue
+        # ── TP0 — vend 20% à +17% ─────────────────────────────
+        if x >= CONFIG["take_profit_0"] and not pos["tp0_hit"]:
+            pos["tp0_hit"] = True
+            wallet.partial_sell(address, 20, x, f"TP0 +{(x-1)*100:.0f}%")
 
-        # Vente 100% à +20%
-        if x >= 1.20 and not pos.get("partial_sold"):
-            pos["partial_sold"] = True
-            wallet.partial_sell(address, 100, x,
-                               f"✅ Vente 100% +{(x-1)*100:.0f}%")
+        # ── TP1 — vend 30% à +50% ─────────────────────────────
+        if x >= CONFIG["take_profit_1"] and not pos["tp1_hit"]:
+            pos["tp1_hit"] = True
+            wallet.partial_sell(address, 30, x, f"TP1 +{(x-1)*100:.0f}%")
+
+        # ── TP2 — vend 20% à +200% ────────────────────────────
+        if x >= CONFIG["take_profit_2"] and not pos["tp2_hit"]:
+            pos["tp2_hit"] = True
+            wallet.partial_sell(address, 20, x, f"TP2 +{(x-1)*100:.0f}%")
+
+        # ── TP3 — vend le reste à +900% ───────────────────────
+        if x >= CONFIG["take_profit_3"] and not pos["tp3_hit"]:
+            pos["tp3_hit"] = True
+            to_close.append((address, x, f"🚀 MOONSHOT {x:.1f}x", None))
 
     for address, x, reason, force_x in to_close:
         wallet.close_position(address, x, reason, force_x=force_x)
 
     # ── Scan nouveaux pools ──────────────────────────────────
-    new_tokens = detector.scan_new_pools() or []
+    new_tokens = detector.scan_new_pools()
     for token in new_tokens:
         if token["address"] in detector.seen:
             continue
         detector.seen.add(token["address"])
+        analysis = analyzer.analyze(token)
+        print_new_token(token, analysis)
 
-        # Anti-rug check
-        rug_analysis = rug_analyzer.analyze(token)
-        src = f"{Fore.GREEN}🌐 VRAI" if token.get("is_real") else f"{Fore.YELLOW}🎮 SIM"
-        print(f"\n  ━━━ NOUVEAU TOKEN {src}{Style.RESET_ALL} ━━━")
-        print(f"  🚀 {token['symbol']} | Age: {token.get('age_min',0):.1f}min | "
-              f"Liq: ${token['liquidity_usd']:,.0f}")
-        if token.get("dex_url"):
-            print(f"  🔗 {token['dex_url']}")
-        print(f"  📊 SCORE ANTI-RUG : {rug_analysis['score']}/100")
-        for k, v in rug_analysis["details"].items():
-            print(f"     {k:<20} {v}")
-        if rug_analysis["flags"]:
-            print(f"  {Fore.RED}🚨 FLAGS : {' | '.join(rug_analysis['flags'])}{Style.RESET_ALL}")
-
-        # Si seul problème = whale, vérifie si tokens verrouillés
-        if not rug_analysis["buyable"] and "CHECK_WHALE_LOCK" in rug_analysis.get("flags", []):
-            print(f"  🔍 Whale détectée — vérification du vesting/lock...")
-            lock_info = hp_analyzer.check_whale_lock(token["address"])
-            print(f"     Lock status : {lock_info['lock_details']}")
-
-            if lock_info["locked"]:
-                print(f"  {Fore.GREEN}✅ Tokens verrouillés — risque whale acceptable{Style.RESET_ALL}")
-                rug_analysis["buyable"] = True  # Override le refus
-                rug_analysis["details"]["Whale Lock"] = f"✅ {lock_info['lock_details']}"
-            else:
-                print(f"  {Fore.RED}❌ REFUSÉ — Whale sans lock détecté{Style.RESET_ALL}")
-                continue
-
-        elif not rug_analysis["buyable"]:
-            print(f"  {Fore.RED}❌ REFUSÉ — Score {rug_analysis['score']}/100{Style.RESET_ALL}")
-            continue
-
-        # ── Vérification honeypot AVANT achat ────────────────
-        print(f"  🔍 Vérification honeypot et contrat...")
-        hp = hp_analyzer.check(token["address"], token["symbol"])
-
-        for k, v in hp["details"].items():
-            print(f"     {k:<20} {v}")
-
-        if hp["dangerous_perms"]:
-            for perm in hp["dangerous_perms"]:
-                print(f"  {Fore.RED}  {perm}{Style.RESET_ALL}")
-
-        if hp["is_honeypot"]:
-            print(f"  {Fore.RED}🚨 HONEYPOT DÉTECTÉ — ACHAT BLOQUÉ !{Style.RESET_ALL}")
-            log.warning(f"🚨 HONEYPOT — {token['symbol']} | Achat bloqué")
-            continue
-
-        if not hp["can_sell"]:
-            print(f"  {Fore.RED}❌ REVENTE IMPOSSIBLE — ACHAT BLOQUÉ !{Style.RESET_ALL}")
-            continue
-
-        if not hp["safe"]:
-            print(f"  {Fore.YELLOW}⚠️  Risques détectés — Trade avec prudence{Style.RESET_ALL}")
-
-        # ── Achat validé ──────────────────────────────────────
-        if wallet.can_snipe():
-            amount = round(wallet.sol_balance * (0.20 if rug_analysis["score"] >= 95 else 0.15 if rug_analysis["score"] >= 90 else 0.10), 4)
+        if analysis["buyable"] and wallet.can_snipe():
             print(f"\n  {Fore.GREEN}⚡ SNIPE ! {token['symbol']} — "
-                  f"Score: {rug_analysis['score']}/100 | {amount:.4f} SOL{Style.RESET_ALL}")
+                  f"{CONFIG['sol_per_trade']} SOL{Style.RESET_ALL}")
+            wallet.open_position(token)
+            log.info(f"⚡ SNIPE — {token['symbol']} | Score: {analysis['score']}/100")
+        else:
+            print(f"  {Fore.RED}❌ REFUSÉ — Score {analysis['score']}/100{Style.RESET_ALL}")
 
-            # Exécution transaction réelle si executor disponible
-            if executor and executor.enabled:
-                print(f"  🔴 Exécution transaction réelle...")
-                buy_result = executor.buy_token(
-                    token_address = token["address"],
-                    sol_amount    = amount,
-                    symbol        = token["symbol"]
-                )
-                if buy_result["success"]:
-                    print(f"  ✅ ACHAT RÉEL CONFIRMÉ !")
-                    print(f"  🔗 https://solscan.io/tx/{buy_result['tx_hash']}")
-                    token["real_amount_bought"] = buy_result.get("amount_received", 0)
-                    wallet.open_position(token, rug_analysis["score"])
-                else:
-                    print(f"  {Fore.RED}❌ Achat échoué: {buy_result.get('reason','')}{Style.RESET_ALL}")
-            else:
-                # Mode simulation
-                wallet.open_position(token, rug_analysis["score"])
-
-            log.info(f"⚡ SNIPE — {token['symbol']} | "
-                     f"AntiRug: {rug_analysis['score']} | "
-                     f"RugCheck: {hp['rugcheck_score']}")
-
+    # Dashboard toutes les 30 secondes
     if int(time.time()) % 30 < 2:
         print_dashboard(wallet, detector.sol_usd)
 
 
-# ─────────────────────────────────────────────────────────────────
-# SOLDE RÉEL
-# ─────────────────────────────────────────────────────────────────
-def get_real_sol_balance() -> float:
-    try:
-        wallet_address = os.getenv("WALLET_ADDRESS", "")
-        if not wallet_address:
-            return CONFIG["initial_capital_sol"]
-        r = requests.post(
-            "https://api.mainnet-beta.solana.com",
-            json={
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "getBalance",
-                "params": [wallet_address]
-            },
-            timeout=10
-        )
-        if r.status_code == 200:
-            lamports = r.json().get("result", {}).get("value", 0)
-            sol = lamports / 1_000_000_000
-            print(f"  💰 Vrai solde wallet : {sol:.4f} SOL")
-            return sol if sol > 0 else CONFIG["initial_capital_sol"]
-    except Exception as e:
-        print(f"  ⚠️  Erreur solde: {e}")
-    return CONFIG["initial_capital_sol"]
-
-
-# ─────────────────────────────────────────────────────────────────
-# POINT D'ENTRÉE
-# ─────────────────────────────────────────────────────────────────
 def main():
     print(f"""{Fore.YELLOW}
 ╔══════════════════════════════════════════════════════════════╗
-║      SOLANA SNIPER BOT v6 — ANTI-HONEYPOT + TP DYNAMIQUE    ║
-║      🛡️  Vérifie honeypot AVANT chaque achat               ║
-║      🔍  Analyse contrat (permissions dangereuses)          ║
-║      📡  TP dynamique selon momentum (2sec)                 ║
-║      LP : brûlés +25pts | verrouillés +15pts               ║
-║      Break-Even : +17% | Stop Loss : -20%                   ║
+║         SOLANA SNIPER BOT — SIMULATION MODE                  ║
+║         Capital   : 50.0 SOL fictifs                        ║
+║         Mise/trade: 2.0 SOL | Scan : 2sec                   ║
+║         Protection: -3% dans les 2 premières secondes       ║
+║         Break-Even: activé dès +15%                         ║
+║         TP0: +17%→20% | TP1: +50%→30%                      ║
+║         TP2: +200%→20% | TP3: +900%→reste                  ║
+║         Stop Loss : -25%                                     ║
 ╚══════════════════════════════════════════════════════════════╝
 {Style.RESET_ALL}""")
 
-    real_balance = get_real_sol_balance()
-    initial      = real_balance if real_balance > 0 else CONFIG["initial_capital_sol"]
-    print(f"  💰 Capital de trading : {initial:.4f} SOL")
-
-    wallet    = SniperWallet(initial)
+    wallet    = SniperWallet(CONFIG["initial_capital_sol"])
     detector  = NewPoolDetector()
-    rug_a     = AntiRugAnalyzer()
-    mom_a     = MomentumAnalyzer()
-    hp_a      = HoneypotAnalyzer()
+    analyzer  = AntiRugAnalyzer()
+    simulator = PriceSimulator()
 
-    # Executor trading réel
-    executor = None
-    if EXECUTOR_AVAILABLE and REAL_MODE:
-        executor = SolanaExecutor()
-        if executor.enabled:
-            print(f"  🔴 TRADING RÉEL ACTIVÉ — Transactions Solana activées")
-        else:
-            print(f"  ⚠️  Executor désactivé — vérifiez les clés")
-    else:
-        print(f"  🎮 Mode simulation — pas de transactions réelles")
-
-    print(f"  ✅ Bot v6 initialisé")
-    print(f"  ⚡ Analyse toutes les {CONFIG['scan_interval_sec']} secondes")
+    print(f"  ✅ Bot initialisé — Capital: {CONFIG['initial_capital_sol']} SOL fictifs")
+    print(f"  ⚡ Scan toutes les {CONFIG['scan_interval_sec']} secondes")
     print(f"  🎯 Score minimum : {CONFIG['min_score']}/100")
     print(f"  Appuie sur Ctrl+C pour arrêter\n")
 
     while True:
         try:
-            run_sniper(wallet, detector, rug_a, mom_a, hp_a, executor)
+            run_sniper(wallet, detector, analyzer, simulator)
             time.sleep(CONFIG["scan_interval_sec"])
         except KeyboardInterrupt:
             print(f"\n{Fore.YELLOW}  ⏹️  Bot arrêté{Style.RESET_ALL}")
