@@ -53,7 +53,7 @@ class SolanaExecutor:
         if self.enabled:
             self._init_wallet()
         else:
-            log.warning("⚠️  Executor désactivé — clés manquantes")
+            log.warning(f"⚠️  Executor désactivé — WALLET_KEY: {bool(self.private_key_str)} | WALLET_ADDR: {bool(self.wallet_address)}")
 
     def _init_wallet(self):
         """Initialise le wallet depuis la clé privée."""
@@ -63,6 +63,7 @@ class SolanaExecutor:
 
             # Supporte les deux formats : base58 et array JSON
             key_str = self.private_key_str.strip()
+            log.info(f"🔑 Longueur clé brute: {len(self.private_key_str)} | Stripped: {len(key_str)}")
 
             if key_str.startswith("["):
                 # Format array JSON [1,2,3,...]
