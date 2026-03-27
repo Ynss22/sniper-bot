@@ -30,3 +30,98 @@
 2026-03-26 20:16:58,683 | ⚡ SNIPE — Blondie | AntiRug: 100 | RugCheck: 501
 2026-03-26 20:20:58,328 | ❌ Erreur init wallet: 'ascii' codec can't encode character '\xe9' in position 5: ordinal not in range(128)
 2026-03-26 20:22:12,622 | ✅ Wallet initialisé : 9quCe4Tm972rPcGckwY9...
+2026-03-26 20:23:44,042 | ✅ Wallet initialisé : 9quCe4Tm972rPcGckwY9...
+2026-03-26 22:00:40,000 | ✅ Wallet initialisé : 9quCe4Tm972rPcGckwY9...
+2026-03-26 22:01:59,543 | API erreur: HTTPSConnectionPool(host='api.dexscreener.com', port=443): Max retries exceeded with url: /token-profiles/latest/v1 (Caused by NewConnectionError('<urllib3.connection.HTTPSConnection object at 0x108427220>: Failed to establish a new connection: [Errno 8] nodename nor servname provided, or not known'))
+2026-03-26 22:02:01,552 | API erreur: HTTPSConnectionPool(host='api.dexscreener.com', port=443): Max retries exceeded with url: /token-profiles/latest/v1 (Caused by NewConnectionError('<urllib3.connection.HTTPSConnection object at 0x108427a90>: Failed to establish a new connection: [Errno 8] nodename nor servname provided, or not known'))
+2026-03-26 22:02:12,466 | ✅ Wallet initialisé : 9quCe4Tm972rPcGckwY9...
+2026-03-26 22:02:37,087 | ✅ Wallet initialisé : 9quCe4Tm972rPcGckwY9...
+2026-03-26 22:03:06,088 | 🛒 ACHAT RÉEL — Chesney
+2026-03-26 22:03:06,088 |    Montant : 0.0495 SOL
+2026-03-26 22:03:06,088 |    Token   : D4EnpszKmdicJy9y7mAQ...
+2026-03-26 22:03:06,093 | ❌ Jupiter quote: HTTPSConnectionPool(host='quote-api.jup.ag', port=443): Max retries exceeded with url: /v6/quote?inputMint=So11111111111111111111111111111111111111112&outputMint=D4EnpszKmdicJy9y7mAQKwBNEctee5zKWgcxC9Nbpump&amount=49500000&slippageBps=500&onlyDirectRoutes=false (Caused by NewConnectionError('<urllib3.connection.HTTPSConnection object at 0x106beffa0>: Failed to establish a new connection: [Errno 8] nodename nor servname provided, or not known'))
+2026-03-26 22:03:06,093 | ⚡ SNIPE — Chesney | AntiRug: 100 | RugCheck: 501
+2026-03-26 22:06:18,292 | ✅ Wallet initialisé : 9quCe4Tm972rPcGckwY9...
+2026-03-26 22:06:27,631 | 🛒 ACHAT RÉEL — Chesney
+2026-03-26 22:06:27,631 |    Montant : 0.0371 SOL
+2026-03-26 22:06:27,631 |    Token   : D4EnpszKmdicJy9y7mAQ...
+2026-03-26 22:06:28,128 | ⚠️  Jupiter quote: HTTPSConnectionPool(host='quote-api.jup.ag', port=443): Max retries exceeded with url: /v6/quote?inputMint=So11111111111111111111111111111111111111112&outputMint=D4EnpszKmdicJy9y7mAQKwBNEctee5zKWgcxC9Nbpump&amount=37100000&slippageBps=500 (Caused by NewConnectionError('<urllib3.connection.HTTPSConnection object at 0x107187760>: Failed to establish a new connection: [Errno 8] nodename nor servname provided, or not known'))
+2026-03-26 22:06:28,128 | ❌ Aucun provider de quote disponible
+2026-03-26 22:06:28,130 | ⚡ SNIPE — Chesney | AntiRug: 90 | RugCheck: 501
+2026-03-26 22:06:28,432 | 🛒 ACHAT RÉEL — LLM4
+2026-03-26 22:06:28,432 |    Montant : 0.0371 SOL
+2026-03-26 22:06:28,432 |    Token   : 9XAjJK2i8eeV9iwAcNUd...
+2026-03-26 22:06:28,866 | ⚠️  Jupiter quote: HTTPSConnectionPool(host='quote-api.jup.ag', port=443): Max retries exceeded with url: /v6/quote?inputMint=So11111111111111111111111111111111111111112&outputMint=9XAjJK2i8eeV9iwAcNUdnz4n4WQzYYyJoTSxfUiJpump&amount=37100000&slippageBps=500 (Caused by NewConnectionError('<urllib3.connection.HTTPSConnection object at 0x1071879d0>: Failed to establish a new connection: [Errno 8] nodename nor servname provided, or not known'))
+2026-03-26 22:06:28,866 | ❌ Aucun provider de quote disponible
+2026-03-26 22:06:28,868 | ⚡ SNIPE — LLM4 | AntiRug: 93 | RugCheck: 501
+2026-03-26 22:10:01,440 | ✅ Wallet initialisé : 9quCe4Tm972rPcGckwY9...
+2026-03-26 22:10:38,226 | ✅ Wallet initialisé : 9quCe4Tm972rPcGckwY9...
+2026-03-26 22:10:46,871 |   ⚠️  Risques détectés — MOON
+2026-03-26 22:10:47,023 | 🛒 ACHAT RÉEL — MOON
+2026-03-26 22:10:47,024 |    Montant : 0.0371 SOL
+2026-03-26 22:10:47,024 |    Token   : 4PHDjTPYe85SX66zPo4M...
+2026-03-26 22:10:47,368 | ⚠️  Jupiter quote: HTTPSConnectionPool(host='quote-api.jup.ag', port=443): Max retries exceeded with url: /v6/quote?inputMint=So11111111111111111111111111111111111111112&outputMint=4PHDjTPYe85SX66zPo4MjNGjspfWAbV3Vbg4T6DZbonk&amount=37100000&slippageBps=500 (Caused by NewConnectionError('<urllib3.connection.HTTPSConnection object at 0x1068956a0>: Failed to establish a new connection: [Errno 8] nodename nor servname provided, or not known'))
+2026-03-26 22:10:47,368 | ❌ Aucun provider de quote disponible
+2026-03-26 22:10:47,370 | ⚡ SNIPE — MOON | AntiRug: 93 | RugCheck: 1
+2026-03-26 22:14:22,790 | ✅ Wallet initialisé : 9quCe4Tm972rPcGckwY9...
+2026-03-26 22:14:32,101 | 🛒 ACHAT RÉEL — Chesney
+2026-03-26 22:14:32,101 |    Montant : 0.0495 SOL
+2026-03-26 22:14:32,102 |    Token   : D4EnpszKmdicJy9y7mAQ...
+2026-03-26 22:14:32,530 | ⚠️  Jupiter quote: HTTPSConnectionPool(host='quote-api.jup.ag', port=443): Max retries exceeded with url: /v6/quote?inputMint=So11111111111111111111111111111111111111112&outputMint=D4EnpszKmdicJy9y7mAQKwBNEctee5zKWgcxC9Nbpump&amount=49500000&slippageBps=500 (Caused by NewConnectionError('<urllib3.connection.HTTPSConnection object at 0x1092b86d0>: Failed to establish a new connection: [Errno 8] nodename nor servname provided, or not known'))
+2026-03-26 22:14:32,531 | ❌ Aucun provider de quote disponible
+2026-03-26 22:14:32,532 | ⚡ SNIPE — Chesney | AntiRug: 100 | RugCheck: 501
+2026-03-26 22:16:33,113 | ✅ Wallet initialisé : 9quCe4Tm972rPcGckwY9...
+2026-03-26 22:16:42,424 | 🛒 ACHAT RÉEL — LLM4
+2026-03-26 22:16:42,424 |    Montant : 0.0371 SOL
+2026-03-26 22:16:42,424 |    Token   : 9XAjJK2i8eeV9iwAcNUd...
+2026-03-26 22:16:42,897 | ❌ Raydium v3 indisponible
+2026-03-26 22:16:42,899 | ⚡ SNIPE — LLM4 | AntiRug: 93 | RugCheck: 501
+2026-03-26 22:23:08,111 | ✅ Wallet initialisé : 9quCe4Tm972rPcGckwY9...
+2026-03-26 22:23:17,527 | 🛒 ACHAT RÉEL — Chesney
+2026-03-26 22:23:17,527 |    Montant : 0.0495 SOL
+2026-03-26 22:23:17,527 |    Token   : D4EnpszKmdicJy9y7mAQ...
+2026-03-26 22:23:17,527 | 🎯 Token Pump.fun détecté — utilisation PumpPortal
+2026-03-26 22:23:17,945 | ❌ PumpPortal erreur: 'solders.transaction.VersionedTransaction' object has no attribute 'sign'
+2026-03-26 22:23:17,947 | ⚠️  PumpPortal échoué — tentative Raydium
+2026-03-26 22:23:18,456 | ⚠️  Jupiter quote: HTTPSConnectionPool(host='quote-api.jup.ag', port=443): Max retries exceeded with url: /v6/quote?inputMint=So11111111111111111111111111111111111111112&outputMint=D4EnpszKmdicJy9y7mAQKwBNEctee5zKWgcxC9Nbpump&amount=49500000&slippageBps=500 (Caused by NewConnectionError('<urllib3.connection.HTTPSConnection object at 0x10ac76700>: Failed to establish a new connection: [Errno 8] nodename nor servname provided, or not known'))
+2026-03-26 22:23:18,457 | ❌ Aucun provider de quote disponible
+2026-03-26 22:23:18,458 | ⚡ SNIPE — Chesney | AntiRug: 100 | RugCheck: 501
+2026-03-26 22:23:18,634 |   ⚠️  Risques détectés — MOON
+2026-03-26 22:23:18,789 | 🛒 ACHAT RÉEL — MOON
+2026-03-26 22:23:18,790 |    Montant : 0.0371 SOL
+2026-03-26 22:23:18,790 |    Token   : 4PHDjTPYe85SX66zPo4M...
+2026-03-26 22:23:19,317 | ⚠️  Jupiter quote: HTTPSConnectionPool(host='quote-api.jup.ag', port=443): Max retries exceeded with url: /v6/quote?inputMint=So11111111111111111111111111111111111111112&outputMint=4PHDjTPYe85SX66zPo4MjNGjspfWAbV3Vbg4T6DZbonk&amount=37100000&slippageBps=500 (Caused by NewConnectionError('<urllib3.connection.HTTPSConnection object at 0x10ac76490>: Failed to establish a new connection: [Errno 8] nodename nor servname provided, or not known'))
+2026-03-26 22:23:19,317 | ❌ Aucun provider de quote disponible
+2026-03-26 22:23:19,319 | ⚡ SNIPE — MOON | AntiRug: 93 | RugCheck: 1
+2026-03-26 22:26:07,681 | ✅ Wallet initialisé : 9quCe4Tm972rPcGckwY9...
+2026-03-26 22:26:17,579 | 🛒 ACHAT RÉEL — Chesney
+2026-03-26 22:26:17,579 |    Montant : 0.0495 SOL
+2026-03-26 22:26:17,579 |    Token   : D4EnpszKmdicJy9y7mAQ...
+2026-03-26 22:26:17,579 | 🎯 Token Pump.fun détecté — utilisation PumpPortal
+2026-03-26 22:26:18,067 | ❌ PumpPortal erreur: 'solders.transaction.VersionedTransaction' object has no attribute 'sign_with'
+2026-03-26 22:26:18,068 | ⚠️  PumpPortal échoué — tentative Raydium
+2026-03-26 22:26:18,601 | ⚠️  Jupiter quote: HTTPSConnectionPool(host='quote-api.jup.ag', port=443): Max retries exceeded with url: /v6/quote?inputMint=So11111111111111111111111111111111111111112&outputMint=D4EnpszKmdicJy9y7mAQKwBNEctee5zKWgcxC9Nbpump&amount=49500000&slippageBps=500 (Caused by NewConnectionError('<urllib3.connection.HTTPSConnection object at 0x10b4a2730>: Failed to establish a new connection: [Errno 8] nodename nor servname provided, or not known'))
+2026-03-26 22:26:18,601 | ❌ Aucun provider de quote disponible
+2026-03-26 22:26:18,603 | ⚡ SNIPE — Chesney | AntiRug: 100 | RugCheck: 501
+2026-03-26 22:27:53,361 | ✅ Wallet initialisé : 9quCe4Tm972rPcGckwY9...
+2026-03-26 22:28:33,277 | ✅ Wallet initialisé : 9quCe4Tm972rPcGckwY9...
+2026-03-26 22:29:07,817 | ✅ Wallet initialisé : 9quCe4Tm972rPcGckwY9...
+2026-03-26 22:29:17,055 | 🛒 ACHAT RÉEL — Chesney
+2026-03-26 22:29:17,055 |    Montant : 0.0495 SOL
+2026-03-26 22:29:17,056 |    Token   : D4EnpszKmdicJy9y7mAQ...
+2026-03-26 22:29:17,056 | 🎯 Token Pump.fun détecté — utilisation PumpPortal
+2026-03-26 22:29:17,624 | ❌ Erreur RPC: {'code': -32002, 'message': 'Transaction simulation failed: Error processing Instruction 3: custom program error: 0x1775', 'data': {'accounts': None, 'err': {'InstructionError': [3, {'Custom': 6005}]}, 'fee': 1005000, 'innerInstructions': None, 'loadedAccountsDataSize': 11542568, 'loadedAddresses': None, 'logs': ['Program ComputeBudget111111111111111111111111111111 invoke [1]', 'Program ComputeBudget111111111111111111111111111111 success', 'Program ComputeBudget111111111111111111111111111111 invoke [1]', 'Program ComputeBudget111111111111111111111111111111 success', 'Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL invoke [1]', 'Program log: CreateIdempotent', 'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]', 'Program log: Instruction: GetAccountDataSize', 'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 1569 of 164349 compute units', 'Program return: TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA pQAAAAAAAAA=', 'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success', 'Program 11111111111111111111111111111111 invoke [2]', 'Program 11111111111111111111111111111111 success', 'Program log: Initialize the associated token account', 'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]', 'Program log: Instruction: InitializeImmutableOwner', 'Program log: Please upgrade to SPL Token 2022 for immutable owner support', 'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 1405 of 157870 compute units', 'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success', 'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]', 'Program log: Instruction: InitializeAccount3', 'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 4188 of 154041 compute units', 'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success', 'Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL consumed 20130 of 169700 compute units', 'Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL success', 'Program FAdo9NCw1ssek6Z6yeWzWjhLVsr8uiCwcWNUnKgzTnHe invoke [1]', 'Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P invoke [2]', 'Program log: Instruction: Buy', 'Program 11111111111111111111111111111111 invoke [3]', 'Program 11111111111111111111111111111111 success', 'Program log: AnchorError thrown in programs/pump/src/lib.rs:346. Error Code: BondingCurveComplete. Error Number: 6005. Error Message: The bonding curve has completed and liquidity migrated to raydium..', 'Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P consumed 51927 of 107763 compute units', 'Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P failed: custom program error: 0x1775', 'Program FAdo9NCw1ssek6Z6yeWzWjhLVsr8uiCwcWNUnKgzTnHe consumed 93734 of 149570 compute units', 'Program FAdo9NCw1ssek6Z6yeWzWjhLVsr8uiCwcWNUnKgzTnHe failed: custom program error: 0x1775'], 'postBalances': None, 'postTokenBalances': None, 'preBalances': None, 'preTokenBalances': None, 'replacementBlockhash': None, 'returnData': None, 'unitsConsumed': 114164}}
+2026-03-26 22:29:17,626 | ⚠️  PumpPortal échoué — tentative Raydium
+2026-03-26 22:29:17,986 | ⚠️  Jupiter quote: HTTPSConnectionPool(host='quote-api.jup.ag', port=443): Max retries exceeded with url: /v6/quote?inputMint=So11111111111111111111111111111111111111112&outputMint=D4EnpszKmdicJy9y7mAQKwBNEctee5zKWgcxC9Nbpump&amount=49500000&slippageBps=500 (Caused by NewConnectionError('<urllib3.connection.HTTPSConnection object at 0x10648ac70>: Failed to establish a new connection: [Errno 8] nodename nor servname provided, or not known'))
+2026-03-26 22:29:17,987 | ❌ Aucun provider de quote disponible
+2026-03-26 22:29:17,988 | ⚡ SNIPE — Chesney | AntiRug: 100 | RugCheck: 501
+2026-03-26 22:32:46,202 | ✅ Wallet initialisé : 9quCe4Tm972rPcGckwY9...
+2026-03-26 22:32:55,417 | 🛒 ACHAT RÉEL — Tryology
+2026-03-26 22:32:55,418 |    Montant : 0.0371 SOL
+2026-03-26 22:32:55,418 |    Token   : 5CvLx1UuVgWyUFnWWqfx...
+2026-03-26 22:32:55,418 | 🎯 Token Pump.fun détecté — utilisation PumpPortal
+2026-03-26 22:32:56,032 | 🔄 Token migré sur Raydium — changement de pool
+2026-03-26 22:32:56,035 | ⚠️  PumpPortal échoué — tentative Raydium
+2026-03-26 22:32:56,614 | ⚠️  Jupiter quote: HTTPSConnectionPool(host='quote-api.jup.ag', port=443): Max retries exceeded with url: /v6/quote?inputMint=So11111111111111111111111111111111111111112&outputMint=5CvLx1UuVgWyUFnWWqfx8qynZn8Eoy9igNemsW2tpump&amount=37100000&slippageBps=500 (Caused by NewConnectionError('<urllib3.connection.HTTPSConnection object at 0x10723bc70>: Failed to establish a new connection: [Errno 8] nodename nor servname provided, or not known'))
+2026-03-26 22:32:56,614 | ❌ Aucun provider de quote disponible
+2026-03-26 22:32:56,616 | ⚡ SNIPE — Tryology | AntiRug: 93 | RugCheck: 120501

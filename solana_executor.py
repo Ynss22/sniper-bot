@@ -32,7 +32,8 @@ log = logging.getLogger("EXECUTOR")
 SOL_MINT     = "So11111111111111111111111111111111111111112"
 LAMPORTS_SOL = 1_000_000_000
 RPC_ENDPOINT = "https://api.mainnet-beta.solana.com"
-JUPITER_URL  = "https://quote-api.jup.ag/v6"
+JUPITER_URL  = "https://quote-api.jup.ag/v6"  # Fallback
+RAYDIUM_URL  = "https://api.raydium.io/v2"
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -126,27 +127,51 @@ class SolanaExecutor:
             log.error(f"❌ Erreur token balance: {e}")
         return 0.0
 
-    def _get_jupiter_quote(self, input_mint: str, output_mint: str,
-                           amount_lamports: int, slippage_bps: int = 500) -> dict:
+    def _get_quote(self, input_mint: str, output_mint: str,
+                   amount_lamports: int, slippage_bps: int = 500) -> dict:
         """
-        Obtient le meilleur prix via Jupiter.
-        slippage_bps = 500 = 5% de slippage maximum.
+        Obtient le meilleur prix via Raydium API.
+        Fallback sur Jupiter si Raydium indisponible.
         """
+        # ── Essai Raydium v3 ─────────────────────────────────
+        try:
+            url = (f"https://api-v3.raydium.io/compute/swap-base-in"
+                   f"?inputMint={input_mint}"
+                   f"&outputMint={output_mint}"
+                   f"&amount={amount_lamports}"
+                   f"&slippageBps={slippage_bps}"
+                   f"&txVersion=V0")
+            r = requests.get(url, timeout=10)
+            if r.status_code == 200:
+                data = r.json()
+                if data.get("success") and data.get("data"):
+                    log.info(f"✅ Quote Raydium v3 obtenu")
+                    return {
+                        "outAmount":      data["data"].get("outputAmount", 0),
+                        "priceImpactPct": data["data"].get("priceImpactPct", 0),
+                        "source":         "raydium_v3",
+                        "raw":            data,
+                    }
+        except Exception as e:
+            log.warning(f"⚠️  Raydium v3 quote: {e}")
+
+        # ── Fallback Jupiter ──────────────────────────────────
         try:
             url = (f"{JUPITER_URL}/quote"
                    f"?inputMint={input_mint}"
                    f"&outputMint={output_mint}"
                    f"&amount={amount_lamports}"
-                   f"&slippageBps={slippage_bps}"
-                   f"&onlyDirectRoutes=false")
-
+                   f"&slippageBps={slippage_bps}")
             r = requests.get(url, timeout=10)
             if r.status_code == 200:
-                return r.json()
-            else:
-                log.error(f"❌ Jupiter quote erreur {r.status_code}: {r.text[:100]}")
+                data = r.json()
+                data["source"] = "jupiter"
+                log.info(f"✅ Quote Jupiter obtenu")
+                return data
         except Exception as e:
-            log.error(f"❌ Jupiter quote: {e}")
+            log.warning(f"⚠️  Jupiter quote: {e}")
+
+        log.error("❌ Aucun provider de quote disponible")
         return {}
 
     def _execute_swap(self, quote: dict) -> Optional[str]:
@@ -184,7 +209,7 @@ class SolanaExecutor:
             # Décoder et signer la transaction
             tx_bytes = base64.b64decode(swap_tx_b64)
             tx       = VersionedTransaction.from_bytes(tx_bytes)
-            tx.sign([self.keypair])
+            tx = VersionedTransaction(tx.message, [self.keypair])
 
             # Envoyer la transaction
             r2 = requests.post(
@@ -251,6 +276,79 @@ class SolanaExecutor:
         log.error("❌ Timeout confirmation transaction")
         return False
 
+    def _buy_via_pumpportal(self, token_address: str, sol_amount: float,
+                             symbol: str = "???") -> dict:
+        """
+        Achète un token Pump.fun via PumpPortal API.
+        Retourne la transaction signée prête à envoyer.
+        """
+        try:
+            from solders.transaction import VersionedTransaction
+
+            r = requests.post(
+                "https://pumpportal.fun/api/trade-local",
+                json={
+                    "publicKey":         self.wallet_address,
+                    "action":            "buy",
+                    "mint":              token_address,
+                    "amount":            sol_amount,
+                    "denominatedInSol":  "true",
+                    "slippage":          10,
+                    "priorityFee":       0.001,
+                    "pool":              "pump",
+                },
+                timeout=15
+            )
+
+            if r.status_code != 200:
+                log.warning(f"⚠️  PumpPortal: {r.status_code}")
+                return {}
+
+            # Signer et envoyer la transaction
+            tx_bytes = r.content
+            tx       = VersionedTransaction.from_bytes(tx_bytes)
+            tx = VersionedTransaction(tx.message, [self.keypair])
+
+            r2 = requests.post(
+                RPC_ENDPOINT,
+                json={
+                    "jsonrpc": "2.0",
+                    "id":      1,
+                    "method":  "sendTransaction",
+                    "params":  [
+                        base64.b64encode(bytes(tx)).decode("utf-8"),
+                        {"encoding": "base64",
+                         "preflightCommitment": "confirmed",
+                         "skipPreflight": False}
+                    ]
+                },
+                timeout=30
+            )
+
+            if r2.status_code == 200:
+                result = r2.json()
+                if "result" in result:
+                    tx_hash = result["result"]
+                    log.info(f"✅ PumpPortal achat confirmé : {tx_hash}")
+                    return {
+                        "success":         True,
+                        "tx_hash":         tx_hash,
+                        "amount_received": 0,
+                        "sol_spent":       sol_amount,
+                        "source":          "pumpportal",
+                    }
+                else:
+                    error = result.get("error", {})
+                    # BondingCurveComplete = token migré sur Raydium
+                    if "6005" in str(error) or "BondingCurve" in str(error):
+                        log.info("🔄 Token migré sur Raydium — changement de pool")
+                        return {"success": False, "reason": "migrated_to_raydium"}
+                    log.error(f"❌ Erreur RPC: {error}")
+
+        except Exception as e:
+            log.error(f"❌ PumpPortal erreur: {e}")
+        return {}
+
     def buy_token(self, token_address: str, sol_amount: float,
                   symbol: str = "???") -> dict:
         """
@@ -282,8 +380,28 @@ class SolanaExecutor:
             log.info(f"   Montant : {sol_amount:.4f} SOL")
             log.info(f"   Token   : {token_address[:20]}...")
 
-            # Obtenir quote Jupiter
-            quote = self._get_jupiter_quote(
+            # ── Essai PumpPortal (tokens pump.fun) ───────────
+            if True:  # Essaie toujours PumpPortal en premier
+                log.info(f"🎯 Token Pump.fun détecté — utilisation PumpPortal")
+                pump_result = self._buy_via_pumpportal(token_address, sol_amount, symbol)
+                if pump_result.get("success"):
+                    return pump_result
+                log.info("🔄 Tentative Raydium v3...")
+                # Essai Raydium v3 directement
+                raydium_url = (f"https://transaction-v1.raydium.io/compute/swap-base-in"
+                               f"?inputMint={SOL_MINT}"
+                               f"&outputMint={token_address}"
+                               f"&amount={lamports}"
+                               f"&slippageBps=500"
+                               f"&txVersion=V0")
+                r3 = requests.get(raydium_url, timeout=10)
+                if r3.status_code == 200 and r3.json().get("success"):
+                    log.info(f"✅ Quote Raydium v3 obtenu pour token migré")
+                    return {"success": False, "reason": "raydium_quote_ok_but_swap_needed"}
+                log.warning("⚠️  Raydium v3 indisponible pour ce token")
+
+            # Obtenir quote Raydium/Jupiter
+            quote = self._get_quote(
                 input_mint     = SOL_MINT,
                 output_mint    = token_address,
                 amount_lamports = lamports,
@@ -351,7 +469,7 @@ class SolanaExecutor:
             log.info(f"   Token   : {token_address[:20]}...")
 
             # Quote Jupiter pour vente
-            quote = self._get_jupiter_quote(
+            quote = self._get_quote(
                 input_mint      = token_address,
                 output_mint     = SOL_MINT,
                 amount_lamports = token_amount,
