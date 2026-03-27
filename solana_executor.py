@@ -202,7 +202,7 @@ class SolanaExecutor:
 
             # Quote
             r = requests.get(
-                f"https://quote-api.jup.ag/v6/quote"
+                f"https://api.jup.ag/swap/v1/quote"
                 f"?inputMint={SOL_MINT}"
                 f"&outputMint={token_address}"
                 f"&amount={lamports}"
@@ -222,7 +222,7 @@ class SolanaExecutor:
 
             # Swap
             r2 = requests.post(
-                "https://quote-api.jup.ag/v6/swap",
+                "https://api.jup.ag/swap/v1/swap",
                 json={"quoteResponse":           quote,
                       "userPublicKey":            self.wallet_address,
                       "wrapAndUnwrapSol":         True,
