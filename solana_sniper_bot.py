@@ -811,7 +811,7 @@ def main():
     # Test connectivité Jupiter
     try:
         import requests as _r
-        _resp = _r.get('https://quote-api.jup.ag/v6/quote?inputMint=So11111111111111111111111111111111111111112&outputMint=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v&amount=1000000&slippageBps=500', timeout=5)
+        _resp = _r.get('https://api.jup.ag/swap/v1/quote?inputMint=So11111111111111111111111111111111111111112&outputMint=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v&amount=1000000', timeout=5)
         print(f'  ✅ Jupiter accessible — Status {_resp.status_code}')
     except Exception as _e:
         print(f'  ❌ Jupiter BLOQUÉ — {_e}')
