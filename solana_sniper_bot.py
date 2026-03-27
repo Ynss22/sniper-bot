@@ -808,6 +808,14 @@ def main():
     print(f"  🎯 Score minimum : {CONFIG['min_score']}/100")
     print(f"  Appuie sur Ctrl+C pour arrêter\n")
 
+    # Test connectivité Jupiter
+    try:
+        import requests as _r
+        _resp = _r.get('https://quote-api.jup.ag/v6/quote?inputMint=So11111111111111111111111111111111111111112&outputMint=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v&amount=1000000&slippageBps=500', timeout=5)
+        print(f'  ✅ Jupiter accessible — Status {_resp.status_code}')
+    except Exception as _e:
+        print(f'  ❌ Jupiter BLOQUÉ — {_e}')
+
     while True:
         try:
             run_sniper(wallet, detector, rug_a, mom_a, hp_a, executor)
