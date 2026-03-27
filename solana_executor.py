@@ -314,8 +314,8 @@ class SolanaExecutor:
         log.info(f"   Montant : {sol_amount:.4f} SOL")
         log.info(f"   Token   : {token_address[:20]}...")
 
-        # Essai 1 : PumpPortal (tokens pump.fun)
-        if token_address.endswith("pump"):
+        # Essai 1 : PumpPortal (supporte pump.fun ET Raydium)
+        if True:
             log.info("🎯 Token Pump.fun — PumpPortal")
             result = self._buy_pumpfun(token_address, sol_amount, symbol)
             if result["success"]:
