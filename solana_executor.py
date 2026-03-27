@@ -71,7 +71,12 @@ class SolanaExecutor:
                 # Format base58
                 key_bytes = base58.b58decode(key_str)
 
-            self.keypair = Keypair.from_bytes(key_bytes)
+            if len(key_bytes) == 64:
+                self.keypair = Keypair.from_bytes(key_bytes)
+            elif len(key_bytes) == 32:
+                self.keypair = Keypair.from_seed(key_bytes)
+            else:
+                self.keypair = Keypair.from_bytes(key_bytes[:64])
             log.info(f"✅ Wallet initialisé : {str(self.keypair.pubkey())[:20]}...")
 
         except ImportError:
