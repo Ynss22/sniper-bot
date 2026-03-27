@@ -170,7 +170,7 @@ class SolanaExecutor:
                       "denominatedInSol": "true",
                       "slippage":         10,
                       "priorityFee":      0.001,
-                      "pool":             "pump"},
+                      "pool":             "pump" if token_address.endswith("pump") else "raydium"},
                 timeout=15
             )
 
@@ -272,7 +272,7 @@ class SolanaExecutor:
                       "denominatedInSol": "false",
                       "slippage":         10,
                       "priorityFee":      0.001,
-                      "pool":             "pump"},
+                      "pool":             "pump" if token_address.endswith("pump") else "raydium"},
                 timeout=15
             )
 
