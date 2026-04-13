@@ -301,7 +301,10 @@ class SniperWallet:
         self.losses        = 0
         self.rugs          = 0
 
-    def can_snipe(self) -> bool:
+    def can_snipe(self, sol_usd: float = 0) -> bool:
+        sol_value_usd = self.sol_balance * sol_usd if sol_usd > 0 else 999
+        if sol_value_usd < 5:
+            return False
         return (self.sol_balance > 0.01 and
                 len(self.positions) < CONFIG["max_positions"])
 
@@ -686,7 +689,7 @@ def run_sniper(wallet: SniperWallet, detector: NewPoolDetector,
             continue
 
         # Achat
-        if wallet.can_snipe():
+        if wallet.can_snipe(detector.sol_usd):
             amount = round(wallet.sol_balance * (0.20 if rug["score"] >= 95 else 0.15 if rug["score"] >= 90 else 0.10), 4)
             print(f"\n  {Fore.GREEN}⚡ SNIPE ! {token['symbol']} — Score:{rug['score']}/100 | {amount:.4f} SOL{Style.RESET_ALL}")
 
