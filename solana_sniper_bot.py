@@ -668,7 +668,10 @@ def run_sniper(wallet: SniperWallet, detector: NewPoolDetector,
         # Vente réelle si executor disponible
         if executor and executor.enabled and wallet.positions.get(address, {}).get("is_real"):
             pos = wallet.positions.get(address, {})
-            executor.sell_token(address, 100, pos.get("symbol", "???"))
+            result = executor.sell_token(address, 100, pos.get("symbol", "???"))
+            if not result.get("success"):
+                log.error(f"❌ Vente échouée ({reason}) — {pos.get('symbol')} : {result.get('reason','?')} — position conservée")
+                continue
         wallet.close_position(address, x, reason, force_x=force_x)
 
     # ── Scan nouveaux pools ───────────────────────────────────
