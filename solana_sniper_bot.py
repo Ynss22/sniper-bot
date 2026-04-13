@@ -48,14 +48,8 @@ CONFIG = {
     "max_liquidity_usd": 500_000,
     "min_score":              80,    # Score anti-rug minimum
     "max_top_holder_pct":     30,    # Top holder max 30%
-    "stop_loss_pct":         -20,    # Stop loss -20%
-    "breakeven_trigger_x":   1.17,  # Break-even dès +17%
-    "max_hold_minutes":       120,
+    "max_hold_minutes":      1440,   # Vente après 24h
     "scan_interval_sec":        2,
-    "tp_low":    1.5,    # Momentum < 40
-    "tp_mid":    5.0,    # Momentum 40-60
-    "tp_high":  10.0,    # Momentum 60-80
-    "tp_moon":  20.0,    # Momentum > 80
 }
 
 logging.basicConfig(
@@ -294,6 +288,7 @@ class SniperWallet:
     def __init__(self, initial_sol: float):
         self.sol_balance   = initial_sol
         self.initial_sol   = initial_sol
+        self.sol_usd       = 0.0
         self.positions     = {}
         self.closed_trades = []
         self.total_trades  = 0
@@ -301,9 +296,8 @@ class SniperWallet:
         self.losses        = 0
         self.rugs          = 0
 
-    def can_snipe(self, sol_usd: float = 0) -> bool:
-        sol_value_usd = self.sol_balance * sol_usd if sol_usd > 0 else 999
-        if sol_value_usd < 5:
+    def can_snipe(self) -> bool:
+        if self.sol_usd > 0 and self.sol_balance * self.sol_usd < 5:
             return False
         return (self.sol_balance > 0.01 and
                 len(self.positions) < CONFIG["max_positions"])
@@ -339,11 +333,6 @@ class SniperWallet:
             "volume_history":       [token.get("volume_5m", 0)],
             "is_real":              token.get("is_real", False),
             "is_rug":               token.get("will_rug", False),
-            "breakeven_active":     False,
-            "dynamic_tp":           CONFIG["tp_mid"],
-            "tp_label":             "📈 MID 5x",
-            "momentum_score":       50,
-            "partial_sold":         False,
         }
         return True
 
@@ -537,11 +526,9 @@ def print_dashboard(wallet: SniperWallet, sol_price: float):
         for addr, pos in wallet.positions.items():
             x      = pos.get("current_x", 1.0)
             xcolor = Fore.GREEN if x >= 1 else Fore.RED
-            age_s  = (datetime.now(timezone.utc) - pos["entry_time"]).seconds
-            be     = f"{Fore.CYAN}🔒{Style.RESET_ALL}" if pos.get("breakeven_active") else ""
+            age_min = (datetime.now(timezone.utc) - pos["entry_time"]).total_seconds() / 60
             print(f"  {xcolor}  {pos['symbol']:<12} {x:.2f}x | "
-                  f"{pos['remaining_pct']:.0f}% | Age:{age_s}s | "
-                  f"{pos.get('tp_label','?')} {be}")
+                  f"{pos['remaining_pct']:.0f}% | Age:{age_min:.0f}min")
 
     if wallet.closed_trades:
         print(f"\n  📜 DERNIERS TRADES :")
@@ -588,44 +575,12 @@ def run_sniper(wallet: SniperWallet, detector: NewPoolDetector,
         pos["peak_x"]    = max(pos.get("peak_x", 1.0), x)
         pos["price_history"].append(x)
 
-        # Analyse momentum
-        mom    = mom_a.analyze(pos, live_data)
-        old_tp = pos.get("dynamic_tp", CONFIG["tp_mid"])
-        pos["dynamic_tp"]     = mom["dynamic_tp"]
-        pos["tp_label"]       = mom["tp_label"]
-        pos["momentum_score"] = mom["score"]
 
-        if mom["dynamic_tp"] != old_tp:
-            print(f"  {Fore.YELLOW}📊 TP AJUSTÉ — {pos['symbol']} | "
-                  f"{old_tp}x → {mom['dynamic_tp']}x | "
-                  f"Mom:{mom['score']}/100{Style.RESET_ALL}")
+        age_min = (datetime.now(timezone.utc) - pos["entry_time"]).total_seconds() / 60
 
-        age_sec = (datetime.now(timezone.utc) - pos["entry_time"]).seconds
-        age_min = age_sec / 60
-
-        # Break-Even +17%
-        if x >= CONFIG["breakeven_trigger_x"] and not pos["breakeven_active"]:
-            pos["breakeven_active"] = True
-            print(f"  {Fore.CYAN}🔒 BREAK-EVEN — {pos['symbol']} | SL = prix d'entrée{Style.RESET_ALL}")
-
-        if pos["breakeven_active"] and x < 1.0:
-            to_close.append((address, x, "🔒 Break-Even — sortie sans perte", 1.0))
-            continue
-
-        # Stop Loss -20%
-        if x <= (1 + CONFIG["stop_loss_pct"] / 100):
-            reason = "Rug Pull 💀" if pos.get("is_rug") else "Stop Loss -20%"
-            to_close.append((address, x, reason, None))
-            continue
-
-        # Temps max
+        # Vente uniquement après 24h de détention
         if age_min >= CONFIG["max_hold_minutes"]:
-            to_close.append((address, x, "⏰ Temps max dépassé", None))
-            continue
-
-        # TP Dynamique
-        if x >= pos["dynamic_tp"]:
-            to_close.append((address, x, f"🎯 {pos['tp_label']} {x:.2f}x", None))
+            to_close.append((address, x, "⏰ 24h — vente automatique", None))
             continue
 
     for address, x, reason, force_x in to_close:
@@ -689,7 +644,8 @@ def run_sniper(wallet: SniperWallet, detector: NewPoolDetector,
             continue
 
         # Achat
-        if wallet.can_snipe(detector.sol_usd):
+        wallet.sol_usd = detector.sol_usd
+        if wallet.can_snipe():
             amount = round(wallet.sol_balance * (0.20 if rug["score"] >= 95 else 0.15 if rug["score"] >= 90 else 0.10), 4)
             print(f"\n  {Fore.GREEN}⚡ SNIPE ! {token['symbol']} — Score:{rug['score']}/100 | {amount:.4f} SOL{Style.RESET_ALL}")
 
