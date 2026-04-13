@@ -201,6 +201,8 @@ class SolanaExecutor:
             lamports = int(sol_amount * LAMPORTS_SOL)
 
             # Quote
+            api_key = os.getenv("JUPITER_API_KEY", "")
+            headers_jup = {"Authorization": f"Bearer {api_key}"} if api_key else {}
             r = requests.get(
                 f"https://api.jup.ag/swap/v1/quote"
                 f"?inputMint={SOL_MINT}"

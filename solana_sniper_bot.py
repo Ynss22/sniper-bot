@@ -142,7 +142,7 @@ class HoneypotAnalyzer:
         # Jupiter simulation vente
         try:
             r = requests.get(
-                f"https://quote-api.jup.ag/v6/quote"
+                f"quote-api.jup.ag"
                 f"?inputMint={token_address}"
                 f"&outputMint=So11111111111111111111111111111111111111112"
                 f"&amount=1000000&slippageBps=500",
