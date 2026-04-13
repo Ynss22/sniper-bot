@@ -255,73 +255,76 @@ class SolanaExecutor:
 
         return {"success": False, "reason": "jupiter_failed"}
 
-    def _sell_jupiter(self, token_address: str, token_amount_pct: float,
-                      symbol: str) -> dict:
-        """Vente via Jupiter — token → SOL."""
-        try:
-            balance = self.get_token_balance(token_address)
-            if balance <= 0:
-                return {"success": False, "reason": "Pas de tokens"}
+    def def _sell_jupiter(self, token_address: str, token_amount_pct: float,
+                  symbol: str) -> dict:
+    """Vente via Jupiter — symétrique à _buy_jupiter."""
+    try:
+        # Récupère balance du token
+        resp = self.client.get_token_accounts_by_owner(
+            self.keypair.pubkey(),
+            {"mint": token_address}
+        )
+        accounts = resp.value
+        if not accounts:
+            return {"success": False, "reason": "Aucun compte token trouvé"}
 
-            amount_to_sell = int(balance * (token_amount_pct / 100))
+        raw_balance = int(accounts[0].account.data.parsed["info"]["tokenAmount"]["amount"])
+        amount_to_sell = int(raw_balance * (token_amount_pct / 100))
 
-            # Quote
-            api_key = os.getenv("JUPITER_API_KEY", "")
-            headers_jup = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-            r = requests.get(
-                f"https://api.jup.ag/swap/v1/quote"
-                f"?inputMint={token_address}"
-                f"&outputMint={SOL_MINT}"
-                f"&amount={amount_to_sell}"
-                f"&slippageBps=500",
-                headers=headers_jup,
-                timeout=10
-            )
+        if amount_to_sell == 0:
+            return {"success": False, "reason": "Balance token = 0"}
 
-            if r.status_code != 200:
-                return {"success": False, "reason": f"Jupiter quote {r.status_code}"}
+        # Quote
+        api_key = os.getenv("JUPITER_API_KEY", "")
+        headers_jup = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        r = requests.get(
+            f"https://api.jup.ag/swap/v1/quote"
+            f"?inputMint={token_address}"
+            f"&outputMint={SOL_MINT}"
+            f"&amount={amount_to_sell}"
+            f"&slippageBps=500",
+            headers=headers_jup,
+            timeout=10
+        )
 
-            quote        = r.json()
-            price_impact = float(quote.get("priceImpactPct", 0))
+        if r.status_code != 200:
+            return {"success": False, "reason": f"Jupiter quote sell {r.status_code}"}
 
-            if price_impact > 15:
-                return {"success": False,
-                        "reason": f"Impact prix trop élevé: {price_impact:.1f}%"}
+        quote = r.json()
 
-            # Swap
-            r2 = requests.post(
-                "https://api.jup.ag/swap/v1/swap",
-                json={"quoteResponse":            quote,
-                      "userPublicKey":             self.wallet_address,
-                      "wrapAndUnwrapSol":          True,
-                      "dynamicComputeUnitLimit":   True,
-                      "prioritizationFeeLamports": 100000},
-                timeout=15
-            )
+        # Swap
+        r2 = requests.post(
+            "https://api.jup.ag/swap/v1/swap",
+            headers=headers_jup,
+            json={"quoteResponse":            quote,
+                  "userPublicKey":             self.wallet_address,
+                  "wrapAndUnwrapSol":          True,
+                  "dynamicComputeUnitLimit":   True,
+                  "prioritizationFeeLamports": 100000},
+            timeout=15
+        )
 
-            if r2.status_code != 200:
-                return {"success": False, "reason": f"Jupiter swap {r2.status_code}"}
+        if r2.status_code != 200:
+            return {"success": False, "reason": f"Jupiter swap sell {r2.status_code}"}
 
-            swap_tx = r2.json().get("swapTransaction", "")
-            if not swap_tx:
-                return {"success": False, "reason": "Pas de transaction Jupiter"}
+        swap_tx = r2.json().get("swapTransaction", "")
+        if not swap_tx:
+            return {"success": False, "reason": "Pas de transaction vente Jupiter"}
 
-            tx_bytes = base64.b64decode(swap_tx)
-            tx_hash  = self._send_transaction(tx_bytes)
+        tx_bytes = base64.b64decode(swap_tx)
+        tx_hash  = self._send_transaction(tx_bytes)
 
-            if tx_hash and tx_hash != "MIGRATED_TO_RAYDIUM":
-                confirmed = self._confirm_transaction(tx_hash)
-                if confirmed:
-                    log.info(f"✅ VENTE JUPITER — {symbol} | {tx_hash[:20]}...")
-                    return {"success": True, "tx_hash": tx_hash,
-                            "source": "jupiter"}
+        if tx_hash:
+            confirmed = self._confirm_transaction(tx_hash)
+            if confirmed:
+                log.info(f"✅ VENTE JUPITER — {symbol} | {tx_hash[:20]}...")
+                return {"success": True, "tx_hash": tx_hash, "source": "jupiter"}
 
-        except Exception as e:
-            log.error(f"❌ Jupiter sell: {e}")
+    except Exception as e:
+        log.error(f"❌ Jupiter sell: {e}")
 
-        return {"success": False, "reason": "jupiter_sell_failed"}
-
-    def _sell_pumpfun(self, token_address: str, token_amount_pct: float,
+    return {"success": False, "reason": "jupiter_sell_failed"}
+def _sell_pumpfun(self, token_address: str, token_amount_pct: float,
                       symbol: str) -> dict:
         """Vente via PumpPortal."""
         try:
@@ -416,10 +419,5 @@ class SolanaExecutor:
             if result["success"]:
                 return result
 
-        # Fallback Jupiter (tokens Raydium ou tout autre)
-        result = self._sell_jupiter(token_address, sell_pct, symbol)
-        if result["success"]:
-            return result
-
-        log.error("❌ Tous les providers de vente ont échoué")
-        return {"success": False, "reason": "Tous providers échoués"}
+        # TODO: Jupiter sell pour tokens Raydium
+        return {"success": False, "reason": "Vente non implémentée pour ce token"}
