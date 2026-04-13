@@ -286,15 +286,16 @@ class AntiRugAnalyzer:
 class SniperWallet:
 
     def __init__(self, initial_sol: float):
-        self.sol_balance   = initial_sol
-        self.initial_sol   = initial_sol
-        self.sol_usd       = 0.0
-        self.positions     = {}
-        self.closed_trades = []
-        self.total_trades  = 0
-        self.wins          = 0
-        self.losses        = 0
-        self.rugs          = 0
+        self.sol_balance      = initial_sol
+        self.initial_sol      = initial_sol
+        self.sol_usd          = 0.0
+        self.positions        = {}
+        self.closed_trades    = []
+        self.total_trades     = 0
+        self.wins             = 0
+        self.losses           = 0
+        self.rugs             = 0
+        self._last_sync_time  = 0.0
 
     def can_snipe(self) -> bool:
         if self.sol_usd > 0 and self.sol_balance * self.sol_usd < 5:
@@ -549,6 +550,21 @@ def print_dashboard(wallet: SniperWallet, sol_price: float):
 def run_sniper(wallet: SniperWallet, detector: NewPoolDetector,
                rug_a: AntiRugAnalyzer, mom_a: MomentumAnalyzer,
                hp_a: HoneypotAnalyzer, executor=None):
+
+    # ── Re-sync solde réel toutes les 60s ────────────────────────
+    if executor and executor.enabled:
+        now = time.time()
+        if now - wallet._last_sync_time >= 60:
+            real_sol = executor.get_sol_balance()
+            if real_sol > 0:
+                sol_en_positions = sum(
+                    p["sol_invested"] * (p["remaining_pct"] / 100)
+                    for p in wallet.positions.values()
+                )
+                wallet.sol_balance   = real_sol - sol_en_positions
+                wallet._last_sync_time = now
+                log.info(f"🔄 Sync solde : {real_sol:.4f} SOL on-chain | "
+                         f"libre : {wallet.sol_balance:.4f} SOL")
 
     to_close = []
 
