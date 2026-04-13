@@ -100,6 +100,27 @@ class SolanaExecutor:
             pass
         return 0.0
 
+    def get_token_balance_raw(self, token_address: str) -> int:
+        """Retourne le solde brut (raw units) — c'est ce que Jupiter attend."""
+        try:
+            r = requests.post(
+                RPC_ENDPOINT,
+                json={"jsonrpc": "2.0", "id": 1,
+                      "method": "getTokenAccountsByOwner",
+                      "params": [self.wallet_address,
+                                 {"mint": token_address},
+                                 {"encoding": "jsonParsed"}]},
+                timeout=10
+            )
+            if r.status_code == 200:
+                accounts = r.json().get("result", {}).get("value", [])
+                if accounts:
+                    info = accounts[0]["account"]["data"]["parsed"]["info"]
+                    return int(info["tokenAmount"]["amount"])
+        except Exception:
+            pass
+        return 0
+
     def _send_transaction(self, tx_bytes: bytes) -> str:
         """Signe et envoie une transaction Solana."""
         try:
@@ -259,11 +280,11 @@ class SolanaExecutor:
                       symbol: str) -> dict:
         """Vente via Jupiter — token → SOL."""
         try:
-            balance = self.get_token_balance(token_address)
-            if balance <= 0:
+            balance_raw = self.get_token_balance_raw(token_address)
+            if balance_raw <= 0:
                 return {"success": False, "reason": "Pas de tokens"}
 
-            amount_to_sell = int(balance * (token_amount_pct / 100))
+            amount_to_sell = int(balance_raw * (token_amount_pct / 100))
 
             # Quote
             api_key = os.getenv("JUPITER_API_KEY", "")
