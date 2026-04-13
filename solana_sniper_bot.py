@@ -52,10 +52,6 @@ CONFIG = {
     "breakeven_trigger_x":   1.17,  # Break-even dès +17%
     "max_hold_minutes":       120,
     "scan_interval_sec":        2,
-    "emergency_dump_pct":     -15,   # Vente urgente si -15%
-    "consecutive_drops":        3,
-    "min_drop_per_scan":    -0.02,
-    "rebounds_to_reset":        2,
     "tp_low":    1.5,    # Momentum < 40
     "tp_mid":    5.0,    # Momentum 40-60
     "tp_high":  10.0,    # Momentum 60-80
@@ -336,9 +332,6 @@ class SniperWallet:
             "remaining_pct":        100.0,
             "current_x":            1.0,
             "peak_x":               1.0,
-            "prev_x":               1.0,
-            "consecutive_drops":    0,
-            "consecutive_rebounds": 0,
             "price_history":        [1.0],
             "volume_history":       [token.get("volume_5m", 0)],
             "is_real":              token.get("is_real", False),
@@ -512,32 +505,6 @@ class NewPoolDetector:
         return None, {}
 
 
-# ─────────────────────────────────────────────────────────────────
-# PROTECTION COMPORTEMENTALE
-# ─────────────────────────────────────────────────────────────────
-def check_protection(pos: dict, x: float) -> tuple:
-    prev_x = pos.get("prev_x", 1.0)
-
-    # Dump urgent
-    if x <= (1 + CONFIG["emergency_dump_pct"] / 100):
-        return True, f"🚨 Dump urgent {(x-1)*100:.1f}%"
-
-    drop = (x - prev_x) / max(prev_x, 1e-10)
-
-    if drop <= CONFIG["min_drop_per_scan"]:
-        pos["consecutive_drops"]    += 1
-        pos["consecutive_rebounds"]  = 0
-    elif drop > 0:
-        pos["consecutive_rebounds"] += 1
-        if pos["consecutive_rebounds"] >= CONFIG["rebounds_to_reset"]:
-            pos["consecutive_drops"]    = 0
-            pos["consecutive_rebounds"] = 0
-
-    if pos["consecutive_drops"] >= CONFIG["consecutive_drops"]:
-        return True, f"📉 {pos['consecutive_drops']} baisses consécutives"
-
-    pos["prev_x"] = x
-    return False, ""
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -632,12 +599,6 @@ def run_sniper(wallet: SniperWallet, detector: NewPoolDetector,
 
         age_sec = (datetime.now(timezone.utc) - pos["entry_time"]).seconds
         age_min = age_sec / 60
-
-        # Protection comportementale
-        sell, reason = check_protection(pos, x)
-        if sell:
-            to_close.append((address, x, reason, None))
-            continue
 
         # Break-Even +17%
         if x >= CONFIG["breakeven_trigger_x"] and not pos["breakeven_active"]:
