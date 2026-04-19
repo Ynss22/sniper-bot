@@ -52,6 +52,16 @@ CONFIG = {
     "scan_interval_sec":        2,
 }
 
+# ── Stratégie TP/SL ──────────────────────────────────────────────
+TP_LEVELS = [
+    {"level": 1, "multiplier":  2.0, "sell_pct": 40.0},
+    {"level": 2, "multiplier":  4.0, "sell_pct": 30.0},
+    {"level": 3, "multiplier": 10.0, "sell_pct": 20.0},
+]
+TRAILING_THRESHOLDS  = {1: 0.60, 2: 0.50, 3: 0.40}
+MAX_DAILY_LOSS_SOL   = 3.0
+MAX_CONCURRENT_POSITIONS = 3
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(message)s",
@@ -296,8 +306,20 @@ class SniperWallet:
         self.losses           = 0
         self.rugs             = 0
         self._last_sync_time  = 0.0
+        self.daily_loss_sol   = 0.0
+        self._last_day_reset  = None
+
+    def _check_day_reset(self):
+        today = datetime.now(timezone.utc).date()
+        if self._last_day_reset != today:
+            self.daily_loss_sol  = 0.0
+            self._last_day_reset = today
 
     def can_snipe(self) -> bool:
+        self._check_day_reset()
+        if self.daily_loss_sol >= MAX_DAILY_LOSS_SOL:
+            log.warning("🚫 DAILY STOP LOSS ATTEINT — achats bloqués")
+            return False
         if self.sol_usd > 0 and self.sol_balance * self.sol_usd < 5:
             return False
         return (self.sol_balance > 0.01 and
@@ -334,6 +356,10 @@ class SniperWallet:
             "volume_history":       [token.get("volume_5m", 0)],
             "is_real":              token.get("is_real", False),
             "is_rug":               token.get("will_rug", False),
+            "tp_triggered":         set(),
+            "initial_sl_done":      False,
+            "timeout_partial_done": False,
+            "entry_time_unix":      time.time(),
         }
         return True
 
@@ -344,6 +370,9 @@ class SniperWallet:
         pos      = self.positions[address]
         actual_x = force_x if force_x is not None else exit_x
         pnl_sol  = pos["sol_invested"] * (actual_x - 1) * (pos["remaining_pct"] / 100)
+        self._check_day_reset()
+        if pnl_sol < 0:
+            self.daily_loss_sol += abs(pnl_sol)
         self.sol_balance += pos["sol_invested"] * (pos["remaining_pct"] / 100) * actual_x
 
         if actual_x >= 1.0:     self.wins += 1
@@ -539,9 +568,62 @@ def print_dashboard(wallet: SniperWallet, sol_price: float):
                   f"{t['exit_x']:.2f}x | {t['pnl_sol']:+.4f} SOL | "
                   f"{t['reason']}{Style.RESET_ALL}")
 
-    print(f"\n  🎯 TP: <40→1.5x | 40-60→5x | 60-80→10x | >80→20x")
-    print(f"  🛡️  Break-Even +17% | SL -20% | Dump -15%")
+    print(f"\n  🎯 TP1:×2→40% | TP2:×4→30% | TP3:×10→20% | Free-ride:10%")
+    print(f"  🛡️  SL_INITIAL -35% | SL_TIMEOUT 45s/50% | Trail -40/50/60%")
+    print(f"  📉 Daily loss: {wallet.daily_loss_sol:.4f}/{MAX_DAILY_LOSS_SOL:.1f} SOL")
     print(f"{Fore.CYAN}{'═'*62}{Style.RESET_ALL}\n")
+
+
+# ─────────────────────────────────────────────────────────────────
+# VENTE PARTIELLE (TP / SL)
+# ─────────────────────────────────────────────────────────────────
+def _execute_partial_sell(wallet: SniperWallet, executor,
+                          address: str, sell_pct_of_initial: float,
+                          current_x: float, action: str) -> bool:
+    """
+    Vend sell_pct_of_initial% du bag initial.
+    Recalcule automatiquement le % on-chain selon remaining_pct.
+    Retry 2x si Jupiter échoue.
+    """
+    pos = wallet.positions.get(address)
+    if not pos:
+        return False
+    remaining = pos.get("remaining_pct", 0.0)
+    if remaining <= 0:
+        return False
+
+    symbol      = pos["symbol"]
+    addr_short  = f"{address[:5]}...{address[-5:]}"
+    entry_price = pos.get("entry_price", 0.0)
+    exit_price  = entry_price * current_x
+    pnl_sol     = pos["sol_invested"] * (sell_pct_of_initial / 100) * (current_x - 1.0)
+
+    if executor and executor.enabled and pos.get("is_real"):
+        executor_pct = min(100.0, (sell_pct_of_initial / remaining) * 100)
+        success      = False
+        last_result  = {}
+        for attempt in range(3):
+            last_result = executor.sell_token(address, executor_pct, symbol)
+            if last_result.get("success"):
+                success = True
+                break
+            if attempt < 2:
+                time.sleep(1)
+        if not success:
+            log.error(f"❌ {action} échoué — {symbol}: {last_result.get('reason','?')}")
+            return False
+
+    sol_received          = pos["sol_invested"] * (sell_pct_of_initial / 100) * current_x
+    wallet.sol_balance   += sol_received
+    pos["remaining_pct"] -= sell_pct_of_initial
+
+    log.info(
+        f"  💰 {action} — {addr_short} | "
+        f"Entrée:{entry_price:.8f}$ → Sortie:{exit_price:.8f}$ | "
+        f"{current_x:.2f}x | P&L:{pnl_sol:+.4f} SOL | "
+        f"{sell_pct_of_initial:.0f}% vendu"
+    )
+    return True
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -591,21 +673,58 @@ def run_sniper(wallet: SniperWallet, detector: NewPoolDetector,
         pos["peak_x"]    = max(pos.get("peak_x", 1.0), x)
         pos["price_history"].append(x)
 
+        age_min     = (datetime.now(timezone.utc) - pos["entry_time"]).total_seconds() / 60
+        entry_age_s = time.time() - pos.get("entry_time_unix", time.time())
 
-        age_min = (datetime.now(timezone.utc) - pos["entry_time"]).total_seconds() / 60
-
-        # Vente uniquement après 24h de détention
+        # 24h — vente automatique
         if age_min >= CONFIG["max_hold_minutes"]:
             to_close.append((address, x, "⏰ 24h — vente automatique", None))
             continue
 
+        tp_triggered = pos.setdefault("tp_triggered", set())
+
+        # ── Phase initiale (avant TP1) ────────────────────────────
+        if 1 not in tp_triggered:
+            if x <= 0.65:
+                to_close.append((address, x, "🛑 SL_INITIAL -35%", None))
+                continue
+            if (entry_age_s > 45 and x < 1.2
+                    and not pos.get("timeout_partial_done")):
+                _execute_partial_sell(wallet, executor, address, 50.0, x,
+                                      "⏱ SL_TIMEOUT")
+                pos["timeout_partial_done"] = True
+
+        # ── Check TPs (ordre croissant, one-shot) ─────────────────
+        for tp in TP_LEVELS:
+            lvl = tp["level"]
+            if lvl in tp_triggered:
+                continue
+            if x >= tp["multiplier"]:
+                _execute_partial_sell(wallet, executor, address,
+                                      tp["sell_pct"], x, f"🎯 TP{lvl}")
+                tp_triggered.add(lvl)
+
+        # ── Trailing SL (post-TP1) ────────────────────────────────
+        if 1 in tp_triggered:
+            last_tp   = max(tp_triggered)
+            threshold = TRAILING_THRESHOLDS.get(last_tp, 0.60)
+            if x < pos["peak_x"] * threshold:
+                to_close.append((address, x,
+                                 f"📉 TRAILING_SL post-TP{last_tp}", None))
+
     for address, x, reason, force_x in to_close:
-        # Vente réelle si executor disponible
         if executor and executor.enabled and wallet.positions.get(address, {}).get("is_real"):
-            pos = wallet.positions.get(address, {})
-            result = executor.sell_token(address, 100, pos.get("symbol", "???"))
+            pos    = wallet.positions.get(address, {})
+            sym    = pos.get("symbol", "???")
+            result = {"success": False}
+            for attempt in range(3):
+                result = executor.sell_token(address, 100, sym)
+                if result.get("success"):
+                    break
+                if attempt < 2:
+                    time.sleep(1)
             if not result.get("success"):
-                log.error(f"❌ Vente échouée ({reason}) — {pos.get('symbol')} : {result.get('reason','?')} — position conservée")
+                log.error(f"❌ Vente échouée ({reason}) — {sym}: {result.get('reason','?')} — position conservée")
                 continue
         wallet.close_position(address, x, reason, force_x=force_x)
 
