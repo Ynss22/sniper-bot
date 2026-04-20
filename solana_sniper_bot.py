@@ -584,6 +584,7 @@ def _execute_partial_sell(wallet: SniperWallet, executor,
     Vend sell_pct_of_initial% du bag initial.
     Recalcule automatiquement le % on-chain selon remaining_pct.
     Retry 2x si Jupiter échoue.
+    Retourne True uniquement si la vente a réussi (ou simulation).
     """
     pos = wallet.positions.get(address)
     if not pos:
@@ -591,6 +592,9 @@ def _execute_partial_sell(wallet: SniperWallet, executor,
     remaining = pos.get("remaining_pct", 0.0)
     if remaining <= 0:
         return False
+
+    # Cap : ne pas vendre plus que ce qui reste
+    sell_pct_of_initial = min(sell_pct_of_initial, remaining)
 
     symbol      = pos["symbol"]
     addr_short  = f"{address[:5]}...{address[-5:]}"
@@ -690,9 +694,9 @@ def run_sniper(wallet: SniperWallet, detector: NewPoolDetector,
                 continue
             if (entry_age_s > 45 and x < 1.2
                     and not pos.get("timeout_partial_done")):
-                _execute_partial_sell(wallet, executor, address, 50.0, x,
-                                      "⏱ SL_TIMEOUT")
-                pos["timeout_partial_done"] = True
+                if _execute_partial_sell(wallet, executor, address, 50.0, x,
+                                         "⏱ SL_TIMEOUT"):
+                    pos["timeout_partial_done"] = True
 
         # ── Check TPs (ordre croissant, one-shot) ─────────────────
         for tp in TP_LEVELS:
@@ -700,9 +704,9 @@ def run_sniper(wallet: SniperWallet, detector: NewPoolDetector,
             if lvl in tp_triggered:
                 continue
             if x >= tp["multiplier"]:
-                _execute_partial_sell(wallet, executor, address,
-                                      tp["sell_pct"], x, f"🎯 TP{lvl}")
-                tp_triggered.add(lvl)
+                if _execute_partial_sell(wallet, executor, address,
+                                         tp["sell_pct"], x, f"🎯 TP{lvl}"):
+                    tp_triggered.add(lvl)
 
         # ── Trailing SL (post-TP1) ────────────────────────────────
         if 1 in tp_triggered:
