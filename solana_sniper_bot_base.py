@@ -468,7 +468,6 @@ class AntiRugAnalyzer:
 
             if holders:
                 raw_pct = float(holders[0].get("pct", holders[0].get("percentage", 100)))
-                # L'API retourne parfois 0.XX (décimal) parfois XX.X (pourcentage)
                 top_holder = raw_pct * 100 if raw_pct <= 1.0 else raw_pct
                 print(f"[DEBUG TOP HOLDER] raw={raw_pct} → final={top_holder:.1f}%")
             else:
