@@ -4,7 +4,12 @@ TP1 +30%→20% | TP2 +50%→40% | TP3 +500%→reste
 SL -30% | Break-even +15% | Mise 5% du solde
 """
 
-import os, time, base64, logging, requests
+import os, time, base64, logging, requests, json, threading
+try:
+    import websocket
+    WS_AVAILABLE = True
+except ImportError:
+    WS_AVAILABLE = False
 from datetime import datetime, timezone
 from colorama import Fore, Style, init
 init(autoreset=True)
@@ -276,68 +281,88 @@ class Wallet:
 
 
 class TokenDetector:
-    def get_new_tokens(self) -> list:
-        tokens = []
+    """
+    Détecte les nouveaux tokens via WebSocket PumpPortal.
+    Reçoit chaque nouveau token dès sa création sur pump.fun.
+    """
 
-        # Source principale : PumpPortal — nouveaux lancements en temps réel
-        try:
-            r = requests.get(
-                "https://frontend-api.pump.fun/coins?offset=0&limit=50&sort=created_timestamp&order=DESC&includeNsfw=false",
-                headers={"Accept": "application/json", "User-Agent": "Mozilla/5.0"},
-                timeout=8
-            )
-            log.info(f"📡 PumpPortal : {r.status_code} | {len(r.json()) if r.status_code == 200 else 0} tokens")
-            if r.status_code == 200:
-                sol_price = 87.0
-                for coin in r.json():
-                    addr = coin.get("mint", "")
-                    if not addr:
-                        continue
-                    # Liquidité = virtual_sol_reserves (lamports) * 2 * prix SOL
-                    sol_reserves = float(coin.get("virtual_sol_reserves", 0)) / 1_000_000_000
-                    liq = sol_reserves * 2 * sol_price
-                    age = self._age_min(coin.get("created_timestamp"))
-                    market_cap = float(coin.get("usd_market_cap", 0))
-                    supply = float(coin.get("total_supply", 1_000_000_000))
-                    price = market_cap / supply if supply > 0 else 0
-                    tokens.append({
-                        "symbol":    coin.get("symbol", "???"),
-                        "address":   addr,
-                        "pair_addr": addr,
-                        "liq_usd":   liq,
-                        "age_min":   age,
-                        "price_usd": price,
-                        "buy_pct":   60.0,
-                    })
-        except Exception as e:
-            log.info(f"⚠️  PumpPortal erreur : {e}")
+    def __init__(self):
+        self._queue  = []
+        self._lock   = threading.Lock()
+        self._ws     = None
+        self._connected = False
+        self._start_ws()
 
-        # Fallback : DexScreener nouvelles paires
-        if not tokens:
+    def _start_ws(self):
+        if not WS_AVAILABLE:
+            log.error("❌ websocket-client non installé — pip install websocket-client")
+            return
+
+        def on_open(ws):
+            self._connected = True
+            log.info("📡 WebSocket PumpPortal connecté")
+            ws.send(json.dumps({"method": "subscribeNewToken"}))
+
+        def on_message(ws, message):
             try:
-                r = requests.get(
-                    "https://api.dexscreener.com/latest/dex/pairs/solana",
-                    timeout=10
-                )
-                data = r.json()
-                pairs = data.get("pairs", []) if isinstance(data, dict) else []
-                log.info(f"📡 DexScreener fallback : {len(pairs)} paires")
-                for pair in pairs:
-                    addr = pair.get("baseToken", {}).get("address", "")
-                    if not addr:
-                        continue
-                    tokens.append({
-                        "symbol":    pair.get("baseToken", {}).get("symbol", "???"),
-                        "address":   addr,
-                        "pair_addr": pair.get("pairAddress", ""),
-                        "liq_usd":   float(pair.get("liquidity", {}).get("usd", 0)),
-                        "age_min":   self._age_min(pair.get("pairCreatedAt")),
-                        "price_usd": float(pair.get("priceUsd", 0) or 0),
-                        "buy_pct":   self._buy_pct(pair),
-                    })
+                data = json.loads(message)
+                mint = data.get("mint", "")
+                if not mint:
+                    return
+                sol_price = 87.0
+                sol_reserves = float(data.get("vSolInBondingCurve", 0))
+                liq = sol_reserves * 2 * sol_price
+                market_cap = float(data.get("marketCapSol", 0)) * sol_price
+                supply = float(data.get("totalSupply", 1_000_000_000))
+                price = market_cap / supply if supply > 0 else 0
+                token = {
+                    "symbol":    data.get("symbol", "???"),
+                    "address":   mint,
+                    "pair_addr": mint,
+                    "liq_usd":   liq,
+                    "age_min":   0.1,
+                    "price_usd": price,
+                    "buy_pct":   65.0,
+                }
+                with self._lock:
+                    self._queue.append(token)
             except Exception as e:
-                log.info(f"⚠️  DexScreener fallback erreur : {e}")
+                log.debug(f"WS parse: {e}")
 
+        def on_error(ws, error):
+            log.info(f"⚠️  WebSocket erreur : {error}")
+            self._connected = False
+
+        def on_close(ws, *args):
+            self._connected = False
+            log.info("⚠️  WebSocket déconnecté — reconnexion dans 5s")
+            time.sleep(5)
+            self._start_ws()
+
+        def run():
+            try:
+                self._ws = websocket.WebSocketApp(
+                    "wss://pumpportal.fun/api/data",
+                    on_open=on_open,
+                    on_message=on_message,
+                    on_error=on_error,
+                    on_close=on_close,
+                )
+                self._ws.run_forever(ping_interval=30, ping_timeout=10)
+            except Exception as e:
+                log.info(f"⚠️  WebSocket run: {e}")
+                time.sleep(5)
+                self._start_ws()
+
+        t = threading.Thread(target=run, daemon=True)
+        t.start()
+
+    def get_new_tokens(self) -> list:
+        with self._lock:
+            tokens = self._queue.copy()
+            self._queue.clear()
+        if tokens:
+            log.info(f"📡 WebSocket : {len(tokens)} nouveau(x) token(s)")
         return tokens
 
     def _get_pair(self, addr: str) -> dict:

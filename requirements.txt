@@ -1,5 +1,6 @@
-requests
+base58
 colorama
+requests
 solana
 solders
-base58
+websocket-client
