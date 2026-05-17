@@ -20,8 +20,8 @@ CONFIG = {
     "max_positions":        3,
     "min_liquidity_usd":    5_000,
     "max_liquidity_usd":  200_000,
-    "max_token_age_min":    30,
-    "min_score":            80,
+    "max_token_age_min":    60,
+    "min_score":            60,
     "max_top_holder_pct":   20,
     "stop_loss_pct":       -30,
     "breakeven_trigger_pct": 15,
@@ -282,7 +282,7 @@ class TokenDetector:
         # Source 1 : DexScreener nouvelles paires Solana
         try:
             r = requests.get(
-                "https://api.dexscreener.com/latest/dex/search?q=solana&rankBy=trendingScoreH6&order=desc",
+                "https://api.dexscreener.com/latest/dex/search?q=solana&rankBy=pairAge&order=asc",
                 timeout=10
             )
             data = r.json()
@@ -594,8 +594,10 @@ def main():
                 seen_tokens.add(token["address"])
 
                 if not (CONFIG["min_liquidity_usd"] <= token["liq_usd"] <= CONFIG["max_liquidity_usd"]):
+                    log.info(f"  ⏭️  {token['symbol']} rejeté — liq ${token['liq_usd']:,.0f}")
                     continue
                 if token["age_min"] > CONFIG["max_token_age_min"]:
+                    log.info(f"  ⏭️  {token['symbol']} rejeté — age {token['age_min']:.0f}min")
                     continue
                 if token["price_usd"] <= 0:
                     continue
