@@ -222,11 +222,13 @@ class AntiRugAnalyzer:
                     data["markets"][0].get("lp", {}).get("lpBurned", False)
                 )
 
-            # ── Top holder — FIX PRINCIPAL ────────────────────────
-            # L'API RugCheck ne retourne pas topHolders pour les tokens
-            # pump.fun récents. La valeur est dans risks sous le nom
-            # "Single holder ownership" avec value "XX.XX%"
-            top_holder = 100.0
+            # ── Top holder — logique correcte ─────────────────────
+            # Si "single holder ownership" est dans risks → valeur dangereuse
+            # Si absent → aucun holder dangereux détecté → on met 5% (safe)
+            # Fallback topHolders pour tokens Raydium classiques
+            top_holder = None
+
+            # 1. Cherche dans risks
             for risk in risks:
                 name = risk.get("name", "").lower()
                 if "single holder" in name:
@@ -234,10 +236,11 @@ class AntiRugAnalyzer:
                     try:
                         top_holder = float(raw)
                     except ValueError:
-                        pass
+                        top_holder = 100.0
                     break
-            else:
-                # Fallback : topHolders classique (tokens Raydium)
+
+            # 2. Fallback topHolders (Raydium)
+            if top_holder is None:
                 holders = (
                     data.get("topHolders")
                     or data.get("top_holders")
@@ -249,6 +252,10 @@ class AntiRugAnalyzer:
                         holders[0].get("pct", holders[0].get("percentage", 1.0))
                     )
                     top_holder = raw * 100 if raw <= 1.0 else raw
+
+            # 3. Si aucun risque holder détecté → aucun holder dangereux
+            if top_holder is None:
+                top_holder = 5.0
 
             return {
                 "mint_disabled":  mint_disabled,
