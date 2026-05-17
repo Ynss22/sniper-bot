@@ -390,6 +390,7 @@ class TokenDetector:
                 headers={"Accept": "application/json"},
                 timeout=8
             )
+            log.info(f"📡 PumpPortal status: {r.status_code} | tokens reçus: {len(r.json()) if r.status_code == 200 else 0}")
             for coin in r.json():
                 addr = coin.get("mint", "")
                 if not addr:
@@ -406,7 +407,7 @@ class TokenDetector:
                     "buy_pct":   60.0,
                 })
         except Exception as e:
-            log.debug(f"PumpPortal: {e}")
+            log.info(f"⚠️  PumpPortal erreur: {e}")
 
         # Source 2 : DexScreener fallback
         if not tokens:
@@ -432,7 +433,7 @@ class TokenDetector:
                         "buy_pct":   self._buy_pct(pair),
                     })
             except Exception as e:
-                log.debug(f"DexScreener: {e}")
+                log.info(f"⚠️  DexScreener erreur: {e}")
 
         return tokens
 
