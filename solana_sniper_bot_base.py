@@ -382,14 +382,17 @@ class Wallet:
 class TokenDetector:
     def get_new_tokens(self) -> list:
         try:
-            r = requests.get("https://api.dexscreener.com/token-profiles/latest/v1", timeout=10)
+            r = requests.get(
+                "https://api.dexscreener.com/latest/dex/search?q=solana",
+                timeout=10
+            )
+            pairs = r.json().get("pairs", [])
             tokens = []
-            for item in r.json():
-                if item.get("chainId") != "solana":
+            for pair in pairs:
+                if pair.get("chainId") != "solana":
                     continue
-                addr = item.get("tokenAddress", "")
-                pair = self._get_pair(addr)
-                if not pair:
+                addr = pair.get("baseToken", {}).get("address", "")
+                if not addr:
                     continue
                 tokens.append({
                     "symbol":    pair.get("baseToken", {}).get("symbol", "???"),
