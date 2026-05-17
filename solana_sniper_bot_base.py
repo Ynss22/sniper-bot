@@ -1,63 +1,38 @@
 """
-╔══════════════════════════════════════════════════════════════════╗
-║       SOLANA SNIPER BOT — VERSION BASE RÉELLE                   ║
-║       PumpPortal (pump.fun) + Jupiter API (Raydium)             ║
-╚══════════════════════════════════════════════════════════════════╝
-
-VARIABLES D'ENVIRONNEMENT REQUISES :
-    WALLET_PRIVATE_KEY  → clé privée Phantom base58
-    WALLET_ADDRESS      → adresse publique Solana
-    JUPITER_API_KEY     → clé gratuite sur portal.jup.ag
+SOLANA SNIPER BOT — BASE RÉELLE
+TP1 +30%→20% | TP2 +50%→40% | TP3 +500%→reste
+SL -30% | Break-even +15% | Mise 5% du solde
 """
 
-import os
-import time
-import base64
-import logging
-import requests
+import os, time, base64, logging, requests
 from datetime import datetime, timezone
 from colorama import Fore, Style, init
-
 init(autoreset=True)
 
-# ─────────────────────────────────────────────────────────────────
-# MODE
-# ─────────────────────────────────────────────────────────────────
 WALLET_KEY     = os.getenv("WALLET_PRIVATE_KEY", "")
 WALLET_ADR     = os.getenv("WALLET_ADDRESS", "")
 JUPITER_APIKEY = os.getenv("JUPITER_API_KEY", "")
 REAL_MODE      = bool(WALLET_KEY and WALLET_ADR and JUPITER_APIKEY)
 
-# ─────────────────────────────────────────────────────────────────
-# CONFIGURATION
-# ─────────────────────────────────────────────────────────────────
 CONFIG = {
-    "initial_capital_sol":  50.0,
-    "stake_pct":             5.0,   # Mise = 5% du solde actualisé
-    "max_positions":         3,
-
-    "min_liquidity_usd":   5_000,
-    "max_liquidity_usd": 200_000,
+    "initial_capital_sol":  0.0,
+    "stake_pct":            5.0,
+    "max_positions":        3,
+    "min_liquidity_usd":    5_000,
+    "max_liquidity_usd":  200_000,
     "max_token_age_min":    30,
     "min_score":            80,
     "max_top_holder_pct":   20,
-
-    "stop_loss_pct":        -30,
+    "stop_loss_pct":       -30,
     "breakeven_trigger_pct": 15,
-
-    "tp0_pct":  17,  "tp0_sell": 20,
-    "tp1_pct":  50,  "tp1_sell": 30,
-    "tp2_pct": 200,  "tp2_sell": 20,
-    "tp3_pct": 900,  "tp3_sell":100,
-
-    "scan_interval_sec":  2,
-    "max_hold_minutes": 120,
-    "slippage_bps":    1000,   # 10%
+    "tp1_pct":  30,  "tp1_sell": 20,
+    "tp2_pct":  50,  "tp2_sell": 40,
+    "tp3_pct": 500,  "tp3_sell":100,
+    "scan_interval_sec":    2,
+    "max_hold_minutes":   120,
+    "slippage_bps":      1000,
 }
 
-# ─────────────────────────────────────────────────────────────────
-# LOGGING
-# ─────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(message)s",
@@ -69,9 +44,6 @@ logging.basicConfig(
 log = logging.getLogger("SNIPER")
 
 
-# ─────────────────────────────────────────────────────────────────
-# EXÉCUTEUR — transactions réelles
-# ─────────────────────────────────────────────────────────────────
 class SolanaExecutor:
     SOL_MINT = "So11111111111111111111111111111111111111112"
 
@@ -109,17 +81,12 @@ class SolanaExecutor:
         try:
             r = requests.post(
                 "https://api.mainnet-beta.solana.com",
-                json={
-                    "jsonrpc":"2.0","id":1,
-                    "method":"getTokenAccountsByOwner",
-                    "params":[self.pub_key, {"mint": token_address}, {"encoding":"jsonParsed"}]
-                },
+                json={"jsonrpc":"2.0","id":1,"method":"getTokenAccountsByOwner",
+                      "params":[self.pub_key,{"mint":token_address},{"encoding":"jsonParsed"}]},
                 timeout=10
             )
             accounts = r.json()["result"]["value"]
-            if not accounts:
-                return 0
-            return int(accounts[0]["account"]["data"]["parsed"]["info"]["tokenAmount"]["amount"])
+            return int(accounts[0]["account"]["data"]["parsed"]["info"]["tokenAmount"]["amount"]) if accounts else 0
         except Exception:
             return 0
 
@@ -128,223 +95,153 @@ class SolanaExecutor:
             from solders.transaction import VersionedTransaction
             from solana.rpc.api import Client
             from solana.rpc.types import TxOpts
-
-            tx_bytes = base64.b64decode(tx_b64)
-            tx = VersionedTransaction.from_bytes(tx_bytes)
+            tx = VersionedTransaction.from_bytes(base64.b64decode(tx_b64))
             signed = VersionedTransaction(tx.message, [self.keypair])
-            client = Client("https://api.mainnet-beta.solana.com")
-            resp = client.send_raw_transaction(
-                bytes(signed),
-                opts=TxOpts(skip_preflight=True, max_retries=3)
+            resp = Client("https://api.mainnet-beta.solana.com").send_raw_transaction(
+                bytes(signed), opts=TxOpts(skip_preflight=True, max_retries=3)
             )
             return str(resp.value)
         except Exception as e:
             log.error(f"  ❌ sign_and_send : {e}")
             return ""
 
-    # ── Achat ────────────────────────────────────────────────────
     def buy(self, token_address: str, symbol: str, amount_sol: float) -> dict:
         if not self.enabled:
             return {"success": True, "simulated": True}
-
         lamports = int(amount_sol * 1_000_000_000)
         log.info(f"🛒 ACHAT RÉEL — {symbol} | {amount_sol:.4f} SOL")
-
         if token_address.endswith("pump"):
             r = self._buy_pumpportal(token_address, symbol, amount_sol)
             if r["success"]:
                 return r
             log.warning("  ⚠️  PumpPortal échoué → Jupiter")
-
         return self._buy_jupiter(token_address, symbol, lamports)
 
-    def _buy_pumpportal(self, token_address: str, symbol: str, amount_sol: float) -> dict:
+    def _buy_pumpportal(self, token_address, symbol, amount_sol):
         try:
             from solders.transaction import VersionedTransaction
             from solana.rpc.api import Client
             from solana.rpc.types import TxOpts
-
             r = requests.post(
                 "https://pumpportal.fun/api/trade-local",
-                headers={"Content-Type": "application/json"},
-                json={
-                    "publicKey": self.pub_key,
-                    "action": "buy",
-                    "mint": token_address,
-                    "amount": amount_sol,
-                    "denominatedInSol": "true",
-                    "slippage": CONFIG["slippage_bps"] / 100,
-                    "priorityFee": 0.0005,
-                    "pool": "pump"
-                },
+                headers={"Content-Type":"application/json"},
+                json={"publicKey":self.pub_key,"action":"buy","mint":token_address,
+                      "amount":amount_sol,"denominatedInSol":"true",
+                      "slippage":CONFIG["slippage_bps"]/100,"priorityFee":0.0005,"pool":"pump"},
                 timeout=15
             )
             if r.status_code != 200:
-                return {"success": False, "reason": f"HTTP {r.status_code}: {r.text[:100]}"}
-
+                return {"success":False,"reason":f"HTTP {r.status_code}"}
             tx = VersionedTransaction.from_bytes(r.content)
             signed = VersionedTransaction(tx.message, [self.keypair])
-            client = Client("https://api.mainnet-beta.solana.com")
-            resp = client.send_raw_transaction(bytes(signed), opts=TxOpts(skip_preflight=True))
+            resp = Client("https://api.mainnet-beta.solana.com").send_raw_transaction(
+                bytes(signed), opts=TxOpts(skip_preflight=True))
             sig = str(resp.value)
             log.info(f"  ✅ PumpPortal TX : {sig[:24]}...")
-            return {"success": True, "signature": sig, "provider": "pumpportal"}
+            return {"success":True,"signature":sig,"provider":"pumpportal"}
         except Exception as e:
-            return {"success": False, "reason": str(e)}
+            return {"success":False,"reason":str(e)}
 
-    def _buy_jupiter(self, token_address: str, symbol: str, lamports: int) -> dict:
+    def _buy_jupiter(self, token_address, symbol, lamports):
         try:
-            h = {"Authorization": f"Bearer {JUPITER_APIKEY}"}
-            r = requests.get(
-                "https://api.jup.ag/swap/v1/quote",
-                headers=h,
-                params={
-                    "inputMint": self.SOL_MINT,
-                    "outputMint": token_address,
-                    "amount": lamports,
-                    "slippageBps": CONFIG["slippage_bps"],
-                },
-                timeout=10
-            )
+            h = {"Authorization":f"Bearer {JUPITER_APIKEY}"}
+            r = requests.get("https://api.jup.ag/swap/v1/quote", headers=h,
+                params={"inputMint":self.SOL_MINT,"outputMint":token_address,
+                        "amount":lamports,"slippageBps":CONFIG["slippage_bps"]}, timeout=10)
             if r.status_code != 200:
-                return {"success": False, "reason": f"Jupiter quote HTTP {r.status_code}: {r.text[:100]}"}
-
-            r2 = requests.post(
-                "https://api.jup.ag/swap/v1/swap",
-                headers={**h, "Content-Type": "application/json"},
-                json={
-                    "quoteResponse": r.json(),
-                    "userPublicKey": self.pub_key,
-                    "wrapAndUnwrapSol": True,
-                    "prioritizationFeeLamports": 500_000,
-                },
-                timeout=15
-            )
+                return {"success":False,"reason":f"Jupiter quote {r.status_code}"}
+            r2 = requests.post("https://api.jup.ag/swap/v1/swap",
+                headers={**h,"Content-Type":"application/json"},
+                json={"quoteResponse":r.json(),"userPublicKey":self.pub_key,
+                      "wrapAndUnwrapSol":True,"prioritizationFeeLamports":500_000}, timeout=15)
             if r2.status_code != 200:
-                return {"success": False, "reason": f"Jupiter swap HTTP {r2.status_code}: {r2.text[:100]}"}
-
-            sig = self._sign_and_send(r2.json().get("swapTransaction", ""))
+                return {"success":False,"reason":f"Jupiter swap {r2.status_code}"}
+            sig = self._sign_and_send(r2.json().get("swapTransaction",""))
             if sig:
                 log.info(f"  ✅ Jupiter achat TX : {sig[:24]}...")
-                return {"success": True, "signature": sig, "provider": "jupiter"}
-            return {"success": False, "reason": "Signature échouée"}
+                return {"success":True,"signature":sig,"provider":"jupiter"}
+            return {"success":False,"reason":"Signature échouée"}
         except Exception as e:
-            return {"success": False, "reason": str(e)}
+            return {"success":False,"reason":str(e)}
 
-    # ── Vente ────────────────────────────────────────────────────
     def sell(self, token_address: str, symbol: str, sell_pct: float) -> dict:
         if not self.enabled:
             return {"success": True, "simulated": True}
-
         log.info(f"💰 VENTE RÉELLE — {symbol} | {sell_pct:.0f}%")
-
         if token_address.endswith("pump"):
             r = self._sell_pumpportal(token_address, symbol, sell_pct)
             if r["success"]:
                 return r
-            log.warning("  ⚠️  PumpPortal vente échouée → Jupiter")
-
         return self._sell_jupiter(token_address, symbol, sell_pct)
 
-    def _sell_pumpportal(self, token_address: str, symbol: str, sell_pct: float) -> dict:
+    def _sell_pumpportal(self, token_address, symbol, sell_pct):
         try:
             from solders.transaction import VersionedTransaction
             from solana.rpc.api import Client
             from solana.rpc.types import TxOpts
-
             r = requests.post(
                 "https://pumpportal.fun/api/trade-local",
-                headers={"Content-Type": "application/json"},
-                json={
-                    "publicKey": self.pub_key,
-                    "action": "sell",
-                    "mint": token_address,
-                    "amount": f"{sell_pct}%",
-                    "denominatedInSol": "false",
-                    "slippage": CONFIG["slippage_bps"] / 100,
-                    "priorityFee": 0.0005,
-                    "pool": "pump"
-                },
+                headers={"Content-Type":"application/json"},
+                json={"publicKey":self.pub_key,"action":"sell","mint":token_address,
+                      "amount":f"{sell_pct}%","denominatedInSol":"false",
+                      "slippage":CONFIG["slippage_bps"]/100,"priorityFee":0.0005,"pool":"pump"},
                 timeout=15
             )
             if r.status_code != 200:
-                return {"success": False, "reason": f"HTTP {r.status_code}: {r.text[:100]}"}
-
+                return {"success":False,"reason":f"HTTP {r.status_code}"}
             tx = VersionedTransaction.from_bytes(r.content)
             signed = VersionedTransaction(tx.message, [self.keypair])
-            client = Client("https://api.mainnet-beta.solana.com")
-            resp = client.send_raw_transaction(bytes(signed), opts=TxOpts(skip_preflight=True))
+            resp = Client("https://api.mainnet-beta.solana.com").send_raw_transaction(
+                bytes(signed), opts=TxOpts(skip_preflight=True))
             sig = str(resp.value)
             log.info(f"  ✅ PumpPortal vente TX : {sig[:24]}...")
-            return {"success": True, "signature": sig, "provider": "pumpportal"}
+            return {"success":True,"signature":sig}
         except Exception as e:
-            return {"success": False, "reason": str(e)}
+            return {"success":False,"reason":str(e)}
 
-    def _sell_jupiter(self, token_address: str, symbol: str, sell_pct: float) -> dict:
+    def _sell_jupiter(self, token_address, symbol, sell_pct):
         try:
             balance = self._get_token_balance(token_address)
             if balance <= 0:
-                return {"success": False, "reason": "Solde token nul"}
-
+                return {"success":False,"reason":"Solde token nul"}
             amount = int(balance * (sell_pct / 100))
-            h = {"Authorization": f"Bearer {JUPITER_APIKEY}"}
-
-            r = requests.get(
-                "https://api.jup.ag/swap/v1/quote",
-                headers=h,
-                params={
-                    "inputMint": token_address,
-                    "outputMint": self.SOL_MINT,
-                    "amount": amount,
-                    "slippageBps": CONFIG["slippage_bps"],
-                },
-                timeout=10
-            )
+            h = {"Authorization":f"Bearer {JUPITER_APIKEY}"}
+            r = requests.get("https://api.jup.ag/swap/v1/quote", headers=h,
+                params={"inputMint":token_address,"outputMint":self.SOL_MINT,
+                        "amount":amount,"slippageBps":CONFIG["slippage_bps"]}, timeout=10)
             if r.status_code != 200:
-                return {"success": False, "reason": f"Jupiter sell quote HTTP {r.status_code}"}
-
-            r2 = requests.post(
-                "https://api.jup.ag/swap/v1/swap",
-                headers={**h, "Content-Type": "application/json"},
-                json={
-                    "quoteResponse": r.json(),
-                    "userPublicKey": self.pub_key,
-                    "wrapAndUnwrapSol": True,
-                    "prioritizationFeeLamports": 500_000,
-                },
-                timeout=15
-            )
+                return {"success":False,"reason":f"Jupiter sell quote {r.status_code}"}
+            r2 = requests.post("https://api.jup.ag/swap/v1/swap",
+                headers={**h,"Content-Type":"application/json"},
+                json={"quoteResponse":r.json(),"userPublicKey":self.pub_key,
+                      "wrapAndUnwrapSol":True,"prioritizationFeeLamports":500_000}, timeout=15)
             if r2.status_code != 200:
-                return {"success": False, "reason": f"Jupiter sell swap HTTP {r2.status_code}"}
-
-            sig = self._sign_and_send(r2.json().get("swapTransaction", ""))
+                return {"success":False,"reason":f"Jupiter sell swap {r2.status_code}"}
+            sig = self._sign_and_send(r2.json().get("swapTransaction",""))
             if sig:
                 log.info(f"  ✅ Jupiter vente TX : {sig[:24]}...")
-                return {"success": True, "signature": sig, "provider": "jupiter"}
-            return {"success": False, "reason": "Signature vente échouée"}
+                return {"success":True,"signature":sig}
+            return {"success":False,"reason":"Signature vente échouée"}
         except Exception as e:
-            return {"success": False, "reason": str(e)}
+            return {"success":False,"reason":str(e)}
 
 
-# ─────────────────────────────────────────────────────────────────
-# WALLET
-# ─────────────────────────────────────────────────────────────────
 class Wallet:
     def __init__(self, executor: SolanaExecutor):
-        self.executor    = executor
-        self.sol_usd     = self._get_sol_price()
-        self.positions   = {}
-        self.trades      = []
-        self.wins        = 0
-        self.losses      = 0
-
+        self.executor  = executor
+        self.sol_usd   = self._get_sol_price()
+        self.positions = {}
+        self.trades    = []
+        self.wins      = 0
+        self.losses    = 0
         if REAL_MODE:
             bal = executor.get_sol_balance()
-            self.sol_balance = bal if bal > 0 else CONFIG["initial_capital_sol"]
-            CONFIG["initial_capital_sol"] = self.sol_balance  # P&L basé sur solde réel
+            self.sol_balance = bal if bal > 0 else 0.1
+            CONFIG["initial_capital_sol"] = self.sol_balance
             log.info(f"  💰 Solde wallet : {self.sol_balance:.4f} SOL")
         else:
-            self.sol_balance = CONFIG["initial_capital_sol"]
+            self.sol_balance = 50.0
+            CONFIG["initial_capital_sol"] = 50.0
 
     def refresh_balance(self):
         if REAL_MODE:
@@ -369,7 +266,8 @@ class Wallet:
 
     @property
     def pnl_pct(self):
-        return (self.pnl_sol / CONFIG["initial_capital_sol"]) * 100
+        cap = CONFIG["initial_capital_sol"]
+        return (self.pnl_sol / cap * 100) if cap > 0 else 0.0
 
     @property
     def win_rate(self):
@@ -377,63 +275,64 @@ class Wallet:
         return (self.wins / total * 100) if total > 0 else 0.0
 
 
-# ─────────────────────────────────────────────────────────────────
-# DÉTECTEUR DE TOKENS (DexScreener)
-# ─────────────────────────────────────────────────────────────────
 class TokenDetector:
     def get_new_tokens(self) -> list:
         tokens = []
-        # Source 1 : PumpPortal (nouveaux tokens pump.fun en temps réel)
+
+        # Source 1 : DexScreener nouvelles paires Solana
         try:
             r = requests.get(
-                "https://frontend-api.pump.fun/coins?offset=0&limit=20&sort=created_timestamp&order=DESC&includeNsfw=false",
-                headers={"Accept": "application/json"},
-                timeout=8
+                "https://api.dexscreener.com/latest/dex/search?q=solana&rankBy=trendingScoreH6&order=desc",
+                timeout=10
             )
-            log.info(f"📡 PumpPortal status: {r.status_code} | tokens reçus: {len(r.json()) if r.status_code == 200 else 0}")
-            for coin in r.json():
-                addr = coin.get("mint", "")
+            data = r.json()
+            pairs = data.get("pairs", []) if isinstance(data, dict) else []
+            log.info(f"📡 DexScreener : {len(pairs)} paires reçues")
+            for pair in pairs:
+                if pair.get("chainId") != "solana":
+                    continue
+                addr = pair.get("baseToken", {}).get("address", "")
                 if not addr:
                     continue
-                liq = float(coin.get("virtual_sol_reserves", 0)) * 2 / 1e9 * 87
-                age = self._age_min(coin.get("created_timestamp"))
                 tokens.append({
-                    "symbol":    coin.get("symbol", "???"),
+                    "symbol":    pair.get("baseToken", {}).get("symbol", "???"),
                     "address":   addr,
-                    "pair_addr": addr,
-                    "liq_usd":   liq,
-                    "age_min":   age,
-                    "price_usd": float(coin.get("usd_market_cap", 0)) / max(float(coin.get("total_supply", 1)), 1),
-                    "buy_pct":   60.0,
+                    "pair_addr": pair.get("pairAddress", ""),
+                    "liq_usd":   float(pair.get("liquidity", {}).get("usd", 0)),
+                    "age_min":   self._age_min(pair.get("pairCreatedAt")),
+                    "price_usd": float(pair.get("priceUsd", 0) or 0),
+                    "buy_pct":   self._buy_pct(pair),
                 })
         except Exception as e:
-            log.info(f"⚠️  PumpPortal erreur: {e}")
+            log.info(f"⚠️  DexScreener erreur : {e}")
 
-        # Source 2 : DexScreener fallback
+        # Source 2 : PumpPortal si DexScreener vide
         if not tokens:
             try:
                 r = requests.get(
-                    "https://api.dexscreener.com/token-profiles/latest/v1",
-                    timeout=10
+                    "https://frontend-api.pump.fun/coins?offset=0&limit=20&sort=created_timestamp&order=DESC",
+                    headers={"Accept":"application/json"},
+                    timeout=8
                 )
-                for item in r.json():
-                    if item.get("chainId") != "solana":
-                        continue
-                    addr = item.get("tokenAddress", "")
-                    pair = self._get_pair(addr)
-                    if not pair:
-                        continue
-                    tokens.append({
-                        "symbol":    pair.get("baseToken", {}).get("symbol", "???"),
-                        "address":   addr,
-                        "pair_addr": pair.get("pairAddress", ""),
-                        "liq_usd":   float(pair.get("liquidity", {}).get("usd", 0)),
-                        "age_min":   self._age_min(pair.get("pairCreatedAt")),
-                        "price_usd": float(pair.get("priceUsd", 0) or 0),
-                        "buy_pct":   self._buy_pct(pair),
-                    })
+                log.info(f"📡 PumpPortal status : {r.status_code}")
+                if r.status_code == 200:
+                    for coin in r.json():
+                        addr = coin.get("mint", "")
+                        if not addr:
+                            continue
+                        sol_price = 87.0
+                        liq = float(coin.get("virtual_sol_reserves", 0)) / 1e9 * sol_price * 2
+                        tokens.append({
+                            "symbol":    coin.get("symbol", "???"),
+                            "address":   addr,
+                            "pair_addr": addr,
+                            "liq_usd":   liq,
+                            "age_min":   self._age_min(coin.get("created_timestamp")),
+                            "price_usd": float(coin.get("usd_market_cap", 0)) / max(float(coin.get("total_supply", 1e9)), 1),
+                            "buy_pct":   60.0,
+                        })
             except Exception as e:
-                log.info(f"⚠️  DexScreener erreur: {e}")
+                log.info(f"⚠️  PumpPortal erreur : {e}")
 
         return tokens
 
@@ -441,9 +340,7 @@ class TokenDetector:
         try:
             r = requests.get(f"https://api.dexscreener.com/latest/dex/tokens/{addr}", timeout=8)
             pairs = [p for p in r.json().get("pairs", []) if p.get("chainId") == "solana"]
-            if not pairs:
-                return {}
-            return sorted(pairs, key=lambda x: float(x.get("liquidity", {}).get("usd", 0)), reverse=True)[0]
+            return sorted(pairs, key=lambda x: float(x.get("liquidity", {}).get("usd", 0)), reverse=True)[0] if pairs else {}
         except Exception:
             return {}
 
@@ -464,9 +361,6 @@ class TokenDetector:
             return 50.0
 
 
-# ─────────────────────────────────────────────────────────────────
-# ANALYSEUR ANTI-RUG (RugCheck)
-# ─────────────────────────────────────────────────────────────────
 class AntiRugAnalyzer:
     def analyze(self, token: dict) -> dict:
         score, flags, detail = 0, [], {}
@@ -474,10 +368,10 @@ class AntiRugAnalyzer:
 
         if rc.get("mint_disabled"):
             score += 25
-            detail["Mint Authority"]  = "✅ Désactivée (+25pts)"
+            detail["Mint Authority"] = "✅ Désactivée (+25pts)"
         else:
             flags.append("MINT_ACTIVE")
-            detail["Mint Authority"]  = "❌ ACTIVE — risque"
+            detail["Mint Authority"] = "❌ ACTIVE — risque"
 
         if rc.get("lp_burned"):
             score += 25
@@ -527,9 +421,6 @@ class AntiRugAnalyzer:
             return {"mint_disabled": False, "lp_burned": False, "top_holder_pct": 100.0}
 
 
-# ─────────────────────────────────────────────────────────────────
-# GESTIONNAIRE DE POSITIONS
-# ─────────────────────────────────────────────────────────────────
 class PositionManager:
     def __init__(self, executor: SolanaExecutor):
         self.executor = executor
@@ -537,20 +428,17 @@ class PositionManager:
     def open_position(self, wallet: Wallet, token: dict, score: int) -> bool:
         if len(wallet.positions) >= CONFIG["max_positions"]:
             return False
-
         size_sol = round(wallet.sol_balance * (CONFIG["stake_pct"] / 100), 4)
-        if size_sol < 0.01:
+        if size_sol < 0.001:
             log.warning("  ⚠️  Solde insuffisant")
             return False
 
         result = self.executor.buy(token["address"], token["symbol"], size_sol)
         if not result["success"]:
-            log.error(f"  ❌ Achat échoué : {result.get('reason', '?')}")
+            log.error(f"  ❌ Achat échoué : {result.get('reason','?')}")
             return False
 
-        # Solde réel actualisé après achat
         wallet.refresh_balance()
-
         wallet.positions[token["symbol"]] = {
             "symbol":            token["symbol"],
             "address":           token["address"],
@@ -564,7 +452,6 @@ class PositionManager:
             "breakeven":         False,
             "tps_hit":           [],
         }
-
         mode_tag = f"{Fore.RED}RÉEL{Style.RESET_ALL}" if REAL_MODE else f"{Fore.GREEN}SIM{Style.RESET_ALL}"
         print(f"\n  [{mode_tag}] ⚡ SNIPE {token['symbol']} — {size_sol:.4f} SOL | Score {score}/100")
         return True
@@ -575,7 +462,6 @@ class PositionManager:
             price = self._current_price(pos["address"])
             if price <= 0:
                 continue
-
             pos["current_price"] = price
             pnl = ((price - pos["entry_price"]) / pos["entry_price"]) * 100
             pos["current_value_sol"] = pos["size_sol"] * (pos["remaining_pct"] / 100) * (1 + pnl / 100)
@@ -584,19 +470,15 @@ class PositionManager:
             if age >= CONFIG["max_hold_minutes"]:
                 to_close.append((symbol, "TIMEOUT", pnl))
                 continue
-
             if pnl <= CONFIG["stop_loss_pct"]:
                 to_close.append((symbol, "STOP_LOSS", pnl))
                 continue
-
             if not pos["breakeven"] and pnl >= CONFIG["breakeven_trigger_pct"]:
                 pos["breakeven"] = True
                 log.info(f"  🔒 Break-even activé — {symbol}")
-
             if pos["breakeven"] and pnl <= 0:
                 to_close.append((symbol, "BREAKEVEN_SL", pnl))
                 continue
-
             self._check_tp(wallet, pos, pnl, symbol)
 
         for symbol, reason, pnl in to_close:
@@ -604,7 +486,6 @@ class PositionManager:
 
     def _check_tp(self, wallet: Wallet, pos: dict, pnl: float, symbol: str):
         tps = [
-            (0, CONFIG["tp0_pct"], CONFIG["tp0_sell"]),
             (1, CONFIG["tp1_pct"], CONFIG["tp1_sell"]),
             (2, CONFIG["tp2_pct"], CONFIG["tp2_sell"]),
             (3, CONFIG["tp3_pct"], CONFIG["tp3_sell"]),
@@ -612,19 +493,15 @@ class PositionManager:
         for tp_id, threshold, sell_pct in tps:
             if tp_id in pos["tps_hit"] or pnl < threshold:
                 continue
-
             result = self.executor.sell(pos["address"], symbol, sell_pct)
             if not result["success"]:
-                log.error(f"  ❌ TP{tp_id} vente échouée : {result.get('reason', '?')}")
+                log.error(f"  ❌ TP{tp_id} vente échouée : {result.get('reason','?')}")
                 continue
-
             pos["tps_hit"].append(tp_id)
             realized = pos["size_sol"] * (sell_pct / 100) * (pos["remaining_pct"] / 100) * (1 + pnl / 100)
             pos["remaining_pct"] *= (1 - sell_pct / 100)
             wallet.refresh_balance()
-
             log.info(f"  💰 TP{tp_id} — {symbol} | +{pnl:.0f}% | +{realized:.4f} SOL")
-
             if tp_id == 3 or pos["remaining_pct"] < 1:
                 self._close(wallet, symbol, f"TP{tp_id}", pnl)
 
@@ -632,20 +509,13 @@ class PositionManager:
         if symbol not in wallet.positions:
             return
         pos = wallet.positions[symbol]
-
-        if reason not in ("TP3", "BREAKEVEN_SL"):
+        if reason not in ("TP3",):
             self.executor.sell(pos["address"], symbol, 100)
-
         wallet.refresh_balance()
-
-        if pnl > 0:
-            wallet.wins += 1
-        else:
-            wallet.losses += 1
-
+        wallet.wins += 1 if pnl > 0 else 0
+        wallet.losses += 1 if pnl <= 0 else 0
         wallet.trades.append({"symbol": symbol, "pnl_pct": pnl, "reason": reason})
         del wallet.positions[symbol]
-
         c = Fore.GREEN if pnl > 0 else Fore.RED
         log.info(f"  {c}🔴 FERMÉ — {symbol} | {pnl:+.1f}% | {reason}{Style.RESET_ALL}")
 
@@ -658,60 +528,46 @@ class PositionManager:
             return 0.0
 
 
-# ─────────────────────────────────────────────────────────────────
-# DASHBOARD
-# ─────────────────────────────────────────────────────────────────
 def print_dashboard(wallet: Wallet):
     usd = wallet.sol_usd
-    print(f"\n{'═' * 62}")
+    print(f"\n{'═'*62}")
     print(f"  🎯 SNIPER BOT — {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"  Mode : {'🔴 TRADING RÉEL' if REAL_MODE else '🎮 SIMULATION'}")
-    print(f"{'─' * 62}")
-    print(f"  SOL balance   : {wallet.sol_balance:.4f} SOL  (${wallet.sol_balance * usd:,.0f})")
-    print(f"  Valeur totale : {wallet.total_value_sol:.4f} SOL  (${wallet.total_value_sol * usd:,.0f})")
+    print(f"{'─'*62}")
+    print(f"  SOL balance   : {wallet.sol_balance:.4f} SOL  (${wallet.sol_balance*usd:,.0f})")
+    print(f"  Valeur totale : {wallet.total_value_sol:.4f} SOL  (${wallet.total_value_sol*usd:,.0f})")
     c = Fore.GREEN if wallet.pnl_sol >= 0 else Fore.RED
     print(f"  P&L           : {c}{wallet.pnl_sol:+.4f} SOL ({wallet.pnl_pct:+.2f}%){Style.RESET_ALL}")
-    print(f"  Trades        : {wallet.wins + wallet.losses} | ✅ {wallet.wins} | ❌ {wallet.losses} | WR {wallet.win_rate:.1f}%")
-
+    print(f"  Trades        : {wallet.wins+wallet.losses} | ✅ {wallet.wins} | ❌ {wallet.losses} | WR {wallet.win_rate:.1f}%")
     if wallet.positions:
-        print(f"{'─' * 62}")
+        print(f"{'─'*62}")
         print(f"  POSITIONS ({len(wallet.positions)}/{CONFIG['max_positions']})")
         for sym, pos in wallet.positions.items():
-            pnl = ((pos["current_price"] - pos["entry_price"]) / pos["entry_price"] * 100) if pos["entry_price"] else 0
-            age = (datetime.now(timezone.utc) - pos["open_time"]).total_seconds() / 60
+            pnl = ((pos["current_price"]-pos["entry_price"])/pos["entry_price"]*100) if pos["entry_price"] else 0
+            age = (datetime.now(timezone.utc)-pos["open_time"]).total_seconds()/60
             c = Fore.GREEN if pnl >= 0 else Fore.RED
             print(f"    {sym:<12} {c}{pnl:+.1f}%{Style.RESET_ALL}  Age:{age:.0f}min  TPs:{pos['tps_hit']}")
-
     if wallet.trades:
-        print(f"{'─' * 62}")
-        print(f"  DERNIERS TRADES")
+        print(f"{'─'*62}")
         for t in wallet.trades[-5:]:
             c = Fore.GREEN if t["pnl_pct"] > 0 else Fore.RED
             print(f"    {t['symbol']:<12} {c}{t['pnl_pct']:+.1f}%{Style.RESET_ALL}  {t['reason']}")
-
-    print(f"{'─' * 62}")
-    print(f"  TP0 +17%→20%  TP1 +50%→30%  TP2 +200%→20%  TP3 +900%→tout")
+    print(f"{'─'*62}")
+    print(f"  TP1 +30%→20%  TP2 +50%→40%  TP3 +500%→reste")
     print(f"  SL -30%  |  Break-even +15%  |  Mise 5% du solde")
-    print(f"{'═' * 62}")
+    print(f"{'═'*62}")
 
 
-# ─────────────────────────────────────────────────────────────────
-# MAIN
-# ─────────────────────────────────────────────────────────────────
 def main():
-    print(f"\n{'╔' + '═' * 62 + '╗'}")
+    print(f"\n{'╔'+'═'*62+'╗'}")
     print(f"║{'  SOLANA SNIPER BOT — BASE RÉELLE':^62}║")
-    print(f"║{'  Mise : 5% du solde  |  SL -30%  |  BE +15%':^62}║")
+    print(f"║{'  TP1 +30%→20% | TP2 +50%→40% | TP3 +500%→reste':^62}║")
     print(f"║{'  Mode : ' + ('🔴 TRADING RÉEL' if REAL_MODE else '🎮 SIMULATION'):^62}║")
-    print(f"{'╚' + '═' * 62 + '╝'}\n")
+    print(f"{'╚'+'═'*62+'╝'}\n")
 
     if not REAL_MODE:
-        print(f"  {Fore.YELLOW}⚠️  Variables manquantes — mode simulation activé")
-        missing = []
-        if not WALLET_KEY:     missing.append("WALLET_PRIVATE_KEY")
-        if not WALLET_ADR:     missing.append("WALLET_ADDRESS")
-        if not JUPITER_APIKEY: missing.append("JUPITER_API_KEY")
-        print(f"  Manquantes : {', '.join(missing)}{Style.RESET_ALL}\n")
+        missing = [k for k,v in [("WALLET_PRIVATE_KEY",WALLET_KEY),("WALLET_ADDRESS",WALLET_ADR),("JUPITER_API_KEY",JUPITER_APIKEY)] if not v]
+        print(f"  {Fore.YELLOW}⚠️  Simulation — manquantes : {', '.join(missing)}{Style.RESET_ALL}\n")
 
     executor    = SolanaExecutor()
     wallet      = Wallet(executor)
@@ -728,11 +584,9 @@ def main():
         try:
             scan_count += 1
 
-            # Positions — mise à jour à chaque cycle (2 sec)
             if wallet.positions:
                 pos_mgr.update_positions(wallet)
 
-            # Nouveaux tokens — scan à chaque cycle (2 sec)
             tokens = detector.get_new_tokens()
             for token in tokens:
                 if token["address"] in seen_tokens:
@@ -752,7 +606,6 @@ def main():
 
                 result = anti_rug.analyze(token)
                 score  = result["score"]
-
                 print(f"  📊 SCORE : {score}/100")
                 for label, val in result["detail"].items():
                     print(f"     {label:<20} {val}")
@@ -763,16 +616,14 @@ def main():
                     print(f"  ❌ REFUSÉ (score {score} < {CONFIG['min_score']})")
                     continue
                 if len(wallet.positions) >= CONFIG["max_positions"]:
-                    print(f"  ⚠️  Max positions atteint ({CONFIG['max_positions']})")
+                    print(f"  ⚠️  Max positions atteint")
                     continue
 
                 pos_mgr.open_position(wallet, token, score)
 
-            # Cache
             if len(seen_tokens) > 500:
                 seen_tokens = set(list(seen_tokens)[-200:])
 
-            # Dashboard toutes les 30 sec
             if scan_count % 15 == 0:
                 wallet.sol_usd = wallet._get_sol_price()
                 print_dashboard(wallet)
