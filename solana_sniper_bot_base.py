@@ -279,60 +279,64 @@ class TokenDetector:
     def get_new_tokens(self) -> list:
         tokens = []
 
-        # Source 1 : DexScreener nouvelles paires Solana
+        # Source principale : PumpPortal — nouveaux lancements en temps réel
         try:
             r = requests.get(
-                "https://api.dexscreener.com/latest/dex/search?q=solana&rankBy=pairAge&order=asc",
-                timeout=10
+                "https://frontend-api.pump.fun/coins?offset=0&limit=50&sort=created_timestamp&order=DESC&includeNsfw=false",
+                headers={"Accept": "application/json", "User-Agent": "Mozilla/5.0"},
+                timeout=8
             )
-            data = r.json()
-            pairs = data.get("pairs", []) if isinstance(data, dict) else []
-            log.info(f"📡 DexScreener : {len(pairs)} paires reçues")
-            for pair in pairs:
-                if pair.get("chainId") != "solana":
-                    continue
-                addr = pair.get("baseToken", {}).get("address", "")
-                if not addr:
-                    continue
-                tokens.append({
-                    "symbol":    pair.get("baseToken", {}).get("symbol", "???"),
-                    "address":   addr,
-                    "pair_addr": pair.get("pairAddress", ""),
-                    "liq_usd":   float(pair.get("liquidity", {}).get("usd", 0)),
-                    "age_min":   self._age_min(pair.get("pairCreatedAt")),
-                    "price_usd": float(pair.get("priceUsd", 0) or 0),
-                    "buy_pct":   self._buy_pct(pair),
-                })
+            log.info(f"📡 PumpPortal : {r.status_code} | {len(r.json()) if r.status_code == 200 else 0} tokens")
+            if r.status_code == 200:
+                sol_price = 87.0
+                for coin in r.json():
+                    addr = coin.get("mint", "")
+                    if not addr:
+                        continue
+                    # Liquidité = virtual_sol_reserves (lamports) * 2 * prix SOL
+                    sol_reserves = float(coin.get("virtual_sol_reserves", 0)) / 1_000_000_000
+                    liq = sol_reserves * 2 * sol_price
+                    age = self._age_min(coin.get("created_timestamp"))
+                    market_cap = float(coin.get("usd_market_cap", 0))
+                    supply = float(coin.get("total_supply", 1_000_000_000))
+                    price = market_cap / supply if supply > 0 else 0
+                    tokens.append({
+                        "symbol":    coin.get("symbol", "???"),
+                        "address":   addr,
+                        "pair_addr": addr,
+                        "liq_usd":   liq,
+                        "age_min":   age,
+                        "price_usd": price,
+                        "buy_pct":   60.0,
+                    })
         except Exception as e:
-            log.info(f"⚠️  DexScreener erreur : {e}")
+            log.info(f"⚠️  PumpPortal erreur : {e}")
 
-        # Source 2 : PumpPortal si DexScreener vide
+        # Fallback : DexScreener nouvelles paires
         if not tokens:
             try:
                 r = requests.get(
-                    "https://frontend-api.pump.fun/coins?offset=0&limit=20&sort=created_timestamp&order=DESC",
-                    headers={"Accept":"application/json"},
-                    timeout=8
+                    "https://api.dexscreener.com/latest/dex/pairs/solana",
+                    timeout=10
                 )
-                log.info(f"📡 PumpPortal status : {r.status_code}")
-                if r.status_code == 200:
-                    for coin in r.json():
-                        addr = coin.get("mint", "")
-                        if not addr:
-                            continue
-                        sol_price = 87.0
-                        liq = float(coin.get("virtual_sol_reserves", 0)) / 1e9 * sol_price * 2
-                        tokens.append({
-                            "symbol":    coin.get("symbol", "???"),
-                            "address":   addr,
-                            "pair_addr": addr,
-                            "liq_usd":   liq,
-                            "age_min":   self._age_min(coin.get("created_timestamp")),
-                            "price_usd": float(coin.get("usd_market_cap", 0)) / max(float(coin.get("total_supply", 1e9)), 1),
-                            "buy_pct":   60.0,
-                        })
+                data = r.json()
+                pairs = data.get("pairs", []) if isinstance(data, dict) else []
+                log.info(f"📡 DexScreener fallback : {len(pairs)} paires")
+                for pair in pairs:
+                    addr = pair.get("baseToken", {}).get("address", "")
+                    if not addr:
+                        continue
+                    tokens.append({
+                        "symbol":    pair.get("baseToken", {}).get("symbol", "???"),
+                        "address":   addr,
+                        "pair_addr": pair.get("pairAddress", ""),
+                        "liq_usd":   float(pair.get("liquidity", {}).get("usd", 0)),
+                        "age_min":   self._age_min(pair.get("pairCreatedAt")),
+                        "price_usd": float(pair.get("priceUsd", 0) or 0),
+                        "buy_pct":   self._buy_pct(pair),
+                    })
             except Exception as e:
-                log.info(f"⚠️  PumpPortal erreur : {e}")
+                log.info(f"⚠️  DexScreener fallback erreur : {e}")
 
         return tokens
 
