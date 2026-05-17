@@ -113,10 +113,7 @@ class Wallet:
 # ─────────────────────────────────────────────────────────────────
 try:
     from solana_executor import SolanaExecutor
-    _executor = SolanaExecutor(
-        private_key=os.getenv("WALLET_PRIVATE_KEY", ""),
-        jupiter_api_key=os.getenv("JUPITER_API_KEY", ""),
-    )
+    _executor = SolanaExecutor()
     log.info("  ✅ SolanaExecutor chargé")
 except Exception as e:
     _executor = None
