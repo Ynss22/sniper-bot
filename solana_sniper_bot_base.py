@@ -37,7 +37,7 @@ CONFIG = {
     # Filtres token
     "min_liquidity_usd":   5_000,
     "max_liquidity_usd": 500_000,
-    "min_score":              60,      # Score anti-rug minimum
+    "min_score":              80,      # Score anti-rug minimum
     "max_top_holder_pct":     20,      # % max du top holder
 
     # Gestion des positions
