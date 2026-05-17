@@ -315,6 +315,10 @@ class TokenDetector:
                 market_cap = float(data.get("marketCapSol", 0)) * sol_price
                 supply = float(data.get("totalSupply", 1_000_000_000))
                 price = market_cap / supply if supply > 0 else 0
+                buys = int(data.get("buys", 0) or data.get("buyCount", 0) or data.get("numBuys", 0))
+                sells = int(data.get("sells", 0) or data.get("sellCount", 0) or data.get("numSells", 0))
+                # Nouveau token = création est un achat ; si aucune donnée, 100 % buy pressure
+                buy_pct = buys / max(buys + sells, 1) * 100 if (buys + sells) > 0 else 100.0
                 token = {
                     "symbol":    data.get("symbol", "???"),
                     "address":   mint,
@@ -322,7 +326,7 @@ class TokenDetector:
                     "liq_usd":   liq,
                     "age_min":   0.1,
                     "price_usd": price,
-                    "buy_pct":   65.0,
+                    "buy_pct":   buy_pct,
                 }
                 with self._lock:
                     self._queue.append(token)
@@ -432,22 +436,53 @@ class AntiRugAnalyzer:
 
         return {"score": score, "flags": flags, "detail": detail}
 
-    def _rugcheck(self, addr: str) -> dict:
+    def _rugcheck(self, token_addr: str) -> dict:
         try:
-            r = requests.get(f"https://api.rugcheck.xyz/v1/tokens/{addr}/report/summary", timeout=8)
+            r = requests.get(
+                f"https://api.rugcheck.xyz/v1/tokens/{token_addr}/report/summary",
+                timeout=8
+            )
             data = r.json()
-            risks = [x.get("name", "").lower() for x in data.get("risks", [])]
-            markets = data.get("markets", [])
-            lp_burned = markets[0].get("lp", {}).get("lpBurned", False) if markets else False
+            print(f"[DEBUG RUGCHECK RAW] {token_addr[:8]}... → keys: {list(data.keys())}")
+
+            risks = data.get("risks", [])
+            risk_names = [r.get("name", "").lower() for r in risks]
+
+            mint_disabled = "mint authority disabled" in risk_names or \
+                            not any("mint" in rn for rn in risk_names)
+
+            # LP burned — plusieurs formats possibles
+            lp_burned = False
+            if "lp burned" in risk_names:
+                lp_burned = True
+            elif data.get("markets"):
+                lp_burned = data["markets"][0].get("lp", {}).get("lpBurned", False)
+
+            # Top holder — tester plusieurs champs possibles
+            top_holder = 100.0
             holders = data.get("topHolders", [])
-            top_holder = float(holders[0].get("pct", 1.0)) * 100 if holders else 100.0
+            if not holders:
+                holders = data.get("top_holders", [])
+            if not holders:
+                holders = data.get("insiders", [])
+
+            if holders:
+                raw_pct = float(holders[0].get("pct", holders[0].get("percentage", 100)))
+                # L'API retourne parfois 0.XX (décimal) parfois XX.X (pourcentage)
+                top_holder = raw_pct * 100 if raw_pct <= 1.0 else raw_pct
+                print(f"[DEBUG TOP HOLDER] raw={raw_pct} → final={top_holder:.1f}%")
+            else:
+                print(f"[DEBUG TOP HOLDER] Aucun holder trouvé dans la réponse. Data: {str(data)[:300]}")
+
             return {
-                "mint_disabled": not any("mint" in r for r in risks) or "mint authority disabled" in risks,
-                "lp_burned":     lp_burned or "lp burned" in risks,
+                "mint_disabled":  mint_disabled,
+                "lp_burned":      lp_burned,
                 "top_holder_pct": top_holder,
+                "score":          data.get("score", 0),
             }
-        except Exception:
-            return {"mint_disabled": False, "lp_burned": False, "top_holder_pct": 100.0}
+        except Exception as e:
+            print(f"[DEBUG RUGCHECK ERROR] {e}")
+            return {"mint_disabled": False, "lp_burned": False, "top_holder_pct": 100.0, "score": 0}
 
 
 class PositionManager:
