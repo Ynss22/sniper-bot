@@ -48,7 +48,7 @@ CONFIG = {
     "tp2_x":                 1.50,     # TP2 : vend 40% à +50%
     "tp2_sell_pct":          40,
     "tp3_x":                 6.00,     # TP3 : vend le reste à +500%
-    "max_hold_minutes":       120,
+    "max_hold_minutes":        30,
     "scan_interval_sec":        2,
 }
 
