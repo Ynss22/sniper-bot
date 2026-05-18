@@ -386,7 +386,7 @@ class PositionManager:
         # Exécution achat
         success = False
         if _executor:
-            result = _executor.buy(token["address"], token["symbol"], size_sol)
+            result = _executor.buy_token(token["address"], size_sol, token["symbol"])
             success = result.get("success", False)
             if not success:
                 log.error(f"  ❌ Achat échoué : {result.get('reason', '?')}")
@@ -465,7 +465,7 @@ class PositionManager:
         actual_pct = sell_pct * pos["remaining_pct"] / 100
         pos["remaining_pct"] -= actual_pct
         if _executor:
-            _executor.sell(pos["address"], pos["symbol"], int(actual_pct))
+            _executor.sell_token(pos["address"], int(actual_pct), pos["symbol"])
         log.info(f"  💰 {label} — {pos['symbol']} | vendu {actual_pct:.0f}% | reste {pos['remaining_pct']:.0f}%")
 
     def _close_position(self, sym: str, x: float, reason: str):
@@ -473,7 +473,7 @@ class PositionManager:
         if not pos:
             return
         if _executor:
-            _executor.sell(pos["address"], sym, 100)
+            _executor.sell_token(pos["address"], 100, sym)
         pnl = (x - 1) * 100
         self.wallet.closed_trades.append({"symbol": sym, "x": x, "reason": reason})
         if x >= 1:
