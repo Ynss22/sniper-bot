@@ -140,11 +140,11 @@ class AntiRugAnalyzer:
 
         # ── RugCheck ──────────────────────────────────────────────
         rc = self._rugcheck(token["address"])
-        mint_disabled = rc["mint_disabled"]
-        lp_burned     = rc["lp_burned"]
-        top_holder    = rc["top_holder_pct"]
+        mint_disabled  = rc["mint_disabled"]
+        no_rug_history = rc["no_rug_history"]
+        top_holder     = rc["top_holder_pct"]
 
-        # 1. Mint authority
+        # 1. Mint authority (+25pts)
         if mint_disabled:
             score += 25
             detail["Mint Authority"] = "✅ Désactivée (+25pts)"
@@ -152,15 +152,17 @@ class AntiRugAnalyzer:
             flags.append("MINT_ACTIVE")
             detail["Mint Authority"] = "❌ ACTIVE — risque"
 
-        # 2. LP tokens
-        if lp_burned:
+        # 2. Historique créateur (+25pts) — remplace LP burned
+        #    pump.fun ne brûle jamais les LP à la création → critère inutile
+        #    On vérifie si le créateur a un historique de rugs
+        if no_rug_history:
             score += 25
-            detail["LP Tokens"] = "✅ Brûlés (+25pts)"
+            detail["Créateur"] = "✅ Pas d'historique de rug (+25pts)"
         else:
-            flags.append("LP_NOT_BURNED")
-            detail["LP Tokens"] = "❌ Non brûlés"
+            flags.append("RUG_HISTORY")
+            detail["Créateur"] = "❌ Historique de rugs détecté"
 
-        # 3. Top holder
+        # 3. Top holder (+20pts)
         if top_holder <= CONFIG["max_top_holder_pct"]:
             score += 20
             detail["Top Holder"] = f"✅ {top_holder:.1f}% (+20pts)"
@@ -168,7 +170,7 @@ class AntiRugAnalyzer:
             flags.append("WHALE_CONCENTRATION")
             detail["Top Holder"] = f"❌ {top_holder:.1f}% — dangereux"
 
-        # 4. Liquidité
+        # 4. Liquidité (+15pts)
         liq = token["liq_usd"]
         if liq >= CONFIG["min_liquidity_usd"]:
             score += 15
@@ -177,7 +179,7 @@ class AntiRugAnalyzer:
             flags.append("LOW_LIQUIDITY")
             detail["Liquidité"] = f"❌ ${liq:,.0f} — trop faible"
 
-        # 5. Buy pressure
+        # 5. Buy pressure (+15pts)
         buy_pct = token["buy_pct"]
         if buy_pct >= 55:
             score += 15
@@ -195,7 +197,7 @@ class AntiRugAnalyzer:
     def _rugcheck(self, addr: str) -> dict:
         defaults = {
             "mint_disabled":   False,
-            "lp_burned":       False,
+            "no_rug_history":  False,
             "top_holder_pct":  100.0,
         }
         try:
@@ -213,14 +215,11 @@ class AntiRugAnalyzer:
                 or not any("mint" in n for n in risk_names)
             )
 
-            # LP burned — champ API ou présence dans risks
-            lp_burned = False
-            if "lp burned" in risk_names:
-                lp_burned = True
-            elif data.get("markets"):
-                lp_burned = (
-                    data["markets"][0].get("lp", {}).get("lpBurned", False)
-                )
+            # Historique de rugs du créateur
+            no_rug_history = not any(
+                "creator history" in n or "rugged" in n
+                for n in risk_names
+            )
 
             # ── Top holder — logique correcte ─────────────────────
             # Si "single holder ownership" est dans risks → valeur dangereuse
@@ -258,9 +257,9 @@ class AntiRugAnalyzer:
                 top_holder = 5.0
 
             return {
-                "mint_disabled":  mint_disabled,
-                "lp_burned":      lp_burned,
-                "top_holder_pct": top_holder,
+                "mint_disabled":   mint_disabled,
+                "no_rug_history":  no_rug_history,
+                "top_holder_pct":  top_holder,
             }
 
         except Exception as e:
